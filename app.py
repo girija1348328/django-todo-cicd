@@ -8,11 +8,12 @@ import numpy as np
 import cv2
 import time
 from datetime import datetime, timedelta
+from threading import Thread
 import threading
 import queue
-import dlib 
+import dlib
 
-if dlib.DLIB_USE_CUDA:
+if getattr(dlib, 'DLIB_USE_CUDA', False):
     print("Running on GPU")
 else:
     print("Running on CPU")
@@ -29,6 +30,20 @@ app.config['DETECTION_COOLDOWN_SECONDS'] = 30  # Time window to prevent duplicat
 
 # Ensure upload folder exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+# Initialize SocketIO
+from flask_socketio import SocketIO
+socketio = SocketIO(app, cors_allowed_origins='*', async_mode='threading')
+
+# Add a basic SocketIO event handler
+@socketio.on('connect')
+def handle_connect():
+    print('Client connected')
+    socketio.emit('server_response', {'data': 'Connected to server'})
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    print('Client disconnected')
 
 db = SQLAlchemy(app)
 
@@ -198,6 +213,8 @@ def gen_frames(video_filename=None, camera_feed_id=None):
     ctx = app.app_context()
     ctx.push()
     camera = None
+    frame_queue = queue.Queue(maxsize=1)
+    stop_event = threading.Event()
     try:
         # Load all employee encodings
         employees = Employee.query.all()
@@ -211,7 +228,6 @@ def gen_frames(video_filename=None, camera_feed_id=None):
             if camera_feed.camera_type == 'device':
                 try:
                     cam_index = int(camera_feed.camera_url)
-                    # Check if the device index is available
                     test_cam = cv2.VideoCapture(cam_index)
                     if not test_cam.isOpened():
                         error_frame = generate_error_frame(f"Camera device index {cam_index} not available")
@@ -239,50 +255,98 @@ def gen_frames(video_filename=None, camera_feed_id=None):
             yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
             return
 
-        detected_today = set()
+        def camera_worker():
+            with app.app_context():
+                detected_today = set()
+                frame_count = 0
+                start_time = time.time()
+                fps = 0.0
+                process_every_n = 3
+                last_face_locations = []
+                last_face_encodings = []
+                last_names = []
+                last_confidences = []
+                while not stop_event.is_set():
+                    success, frame = camera.read()
+                    if not success or frame is None:
+                        continue
+                    frame_count += 1
+                    process_this_frame = (frame_count % process_every_n == 0)
+                    if process_this_frame:
+                        # Resize frame for faster processing
+                        small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
+                        rgb_small_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
+                        last_face_locations = face_recognition.face_locations(rgb_small_frame)
+                        last_face_encodings = face_recognition.face_encodings(rgb_small_frame, last_face_locations)
+                        last_names = []
+                        last_confidences = []
+                        for face_encoding in last_face_encodings:
+                            matches = face_recognition.compare_faces(known_encodings, face_encoding, tolerance=0.5)
+                            name = "Unknown"
+                            confidence = 0.0
+                            for idx, match in enumerate(matches):
+                                if match:
+                                    name = known_names[idx]
+                                    face_distances = face_recognition.face_distance(known_encodings, face_encoding)
+                                    confidence = 1 - face_distances[idx]
+                                    today = datetime.utcnow().date()
+                                    recent_attendance = AttendanceLog.query.filter(
+                                        AttendanceLog.employee_name == name,
+                                        db.func.date(AttendanceLog.timestamp) == today
+                                    ).first()
+                                    if not recent_attendance:
+                                        log = AttendanceLog(
+                                            employee_name=name,
+                                            attendance_type='live' if camera_feed_id else 'cctv',
+                                            camera_feed_id=camera_feed_id,
+                                            camera_feed_name=camera_feed.name if camera_feed_id else None,
+                                            confidence_score=confidence
+                                        )
+                                        db.session.add(log)
+                                        db.session.commit()
+                                        detected_today.add(name)
+                                    break
+                            last_names.append(name)
+                            last_confidences.append(confidence)
+                    # Draw boxes and labels using last results, scale up coordinates
+                    for (top, right, bottom, left), name, confidence in zip(last_face_locations, last_names, last_confidences):
+                        top *= 4
+                        right *= 4
+                        bottom *= 4
+                        left *= 4
+                        color = (0, 0, 255) if name != "Unknown" else (0, 255, 0)
+                        cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
+                        label = f"{name} ({confidence:.2f})" if name != "Unknown" else name
+                        cv2.putText(frame, label, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+                    # FPS calculation
+                    elapsed_time = time.time() - start_time
+                    if elapsed_time > 0:
+                        fps = frame_count / elapsed_time
+                    # Optionally, display FPS (uncomment to show)
+                    # cv2.putText(frame, f"FPS: {fps:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+                    # Put the latest frame in the queue (replace old frame)
+                    if not frame_queue.empty():
+                        try:
+                            frame_queue.get_nowait()
+                        except queue.Empty:
+                            pass
+                    frame_queue.put(frame)
+
+        worker_thread = threading.Thread(target=camera_worker, daemon=True)
+        worker_thread.start()
+
         while True:
-            success, frame = camera.read()
-            if not success or frame is None:
-                break
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            face_locations = face_recognition.face_locations(rgb_frame)
-            face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
-
-            for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
-                matches = face_recognition.compare_faces(known_encodings, face_encoding, tolerance=0.5)
-                name = "Unknown"
-                confidence = 0.0
-
-                for idx, match in enumerate(matches):
-                    if match:
-                        name = known_names[idx]
-                        face_distances = face_recognition.face_distance(known_encodings, face_encoding)
-                        confidence = 1 - face_distances[idx]
-                        # Only log attendance once per employee per day
-                        today = datetime.utcnow().date()
-                        recent_attendance = AttendanceLog.query.filter(
-                            AttendanceLog.employee_name == name,
-                            db.func.date(AttendanceLog.timestamp) == today
-                        ).first()
-                        if not recent_attendance:
-                            log = AttendanceLog(
-                                employee_name=name,
-                                attendance_type='live' if camera_feed_id else 'cctv',
-                                camera_feed_id=camera_feed_id,
-                                camera_feed_name=camera_feed.name if camera_feed_id else None,
-                                confidence_score=confidence
-                            )
-                            db.session.add(log)
-                            db.session.commit()
-                            detected_today.add(name)
-                        break
-                color = (0, 0, 255) if name != "Unknown" else (0, 255, 0)
-                cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
-                label = f"{name} ({confidence:.2f})" if name != "Unknown" else name
-                cv2.putText(frame, label, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
-            ret, buffer = cv2.imencode('.jpg', frame)
-            frame_bytes = buffer.tobytes()
-            yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            try:
+                frame = frame_queue.get(timeout=2)
+                ret, buffer = cv2.imencode('.jpg', frame)
+                frame_bytes = buffer.tobytes()
+                yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            except queue.Empty:
+                # If no frame is available, yield an error frame
+                error_frame = generate_error_frame("Waiting for camera...")
+                ret, buffer = cv2.imencode('.jpg', error_frame)
+                frame_bytes = buffer.tobytes()
+                yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
     except Exception as e:
         print(f"Error in gen_frames: {e}")
         error_frame = generate_error_frame(f"Error: {str(e)}")
@@ -290,6 +354,7 @@ def gen_frames(video_filename=None, camera_feed_id=None):
         frame_bytes = buffer.tobytes()
         yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
     finally:
+        stop_event.set()
         if camera is not None:
             camera.release()
         ctx.pop()
@@ -317,30 +382,30 @@ def generate_error_frame(message):
     """Generate an error frame with a message"""
     # Create a black frame
     frame = np.zeros((480, 640, 3), dtype=np.uint8)
-    
+
     # Add error text
     font = cv2.FONT_HERSHEY_SIMPLEX
     font_scale = 1
     thickness = 2
     color = (255, 255, 255)
-    
+
     # Get text size
     (text_width, text_height), baseline = cv2.getTextSize(message, font, font_scale, thickness)
-    
+
     # Calculate position to center the text
     x = (frame.shape[1] - text_width) // 2
     y = (frame.shape[0] + text_height) // 2
-    
+
     # Add text
     cv2.putText(frame, message, (x, y), font, font_scale, color, thickness)
-    
+
     # Add additional help text
     help_text = "Check camera connection or try video upload"
     (help_width, help_height), _ = cv2.getTextSize(help_text, font, 0.7, 1)
     help_x = (frame.shape[1] - help_width) // 2
     help_y = y + 50
     cv2.putText(frame, help_text, (help_x, help_y), font, 0.7, (200, 200, 200), 1)
-    
+
     return frame
 
 @app.route('/live_detection')
@@ -420,10 +485,10 @@ def add_camera_feed():
     camera_type = request.form.get('camera_type')
     location = request.form.get('location')
     description = request.form.get('description')
-    
+
     if not name or not camera_url or not camera_type:
         return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
-    
+
     try:
         camera_feed = CameraFeed(
             name=name,
@@ -465,7 +530,7 @@ def edit_camera_feed(camera_feed_id):
     location = request.form.get('location')
     description = request.form.get('description')
     is_active = request.form.get('is_active')
-    
+
     if name:
         camera_feed.name = name
     if camera_url:
@@ -478,7 +543,7 @@ def edit_camera_feed(camera_feed_id):
         camera_feed.description = description
     if is_active is not None:
         camera_feed.is_active = is_active.lower() == 'true'
-    
+
     try:
         db.session.commit()
         return jsonify({'status': 'success', 'message': 'Camera feed updated successfully'})
@@ -518,16 +583,16 @@ def test_camera_feed(camera_feed_id):
                     return jsonify({'status': 'error', 'message': 'No camera devices available'}), 400
         else:
             camera = cv2.VideoCapture(camera_feed.camera_url)
-        
+
         if camera is None or not camera.isOpened():
             return jsonify({'status': 'error', 'message': 'Cannot connect to camera feed'}), 400
-        
+
         ret, frame = camera.read()
         if ret and frame is not None:
             return jsonify({'status': 'success', 'message': 'Camera feed is working'})
         else:
             return jsonify({'status': 'error', 'message': 'Camera feed is not working - no video signal'}), 400
-            
+
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'Error testing camera: {str(e)}'}), 500
     finally:
@@ -563,15 +628,15 @@ def get_employee_status_data():
         # Get all employees
         employees = Employee.query.all()
         employee_data = []
-        
+
         # Get recent attendance logs
         cooldown_seconds = app.config.get('DETECTION_COOLDOWN_SECONDS', 30)
         recent_time = datetime.utcnow() - timedelta(seconds=cooldown_seconds)
-        
+
         recent_attendances = AttendanceLog.query.filter(
             AttendanceLog.timestamp >= recent_time
         ).all()
-        
+
         # Create a map of recent detections
         recent_attendance_map = {}
         for attendance in recent_attendances:
@@ -582,12 +647,12 @@ def get_employee_status_data():
                 'attendance_type': attendance.attendance_type,
                 'camera_feed_name': attendance.camera_feed_name
             })
-        
+
         # Build status data for each employee
         for employee in employees:
             recent_attendances_for_employee = recent_attendance_map.get(employee.name, [])
             is_present = len(recent_attendances_for_employee) > 0
-            
+
             employee_data.append({
                 'id': employee.id,
                 'name': employee.name,
@@ -598,7 +663,7 @@ def get_employee_status_data():
                 'last_detected': recent_attendances_for_employee[-1]['timestamp'] if recent_attendances_for_employee else None,
                 'recent_attendances': recent_attendances_for_employee
             })
-        
+
         return jsonify({
             'employees': employee_data,
             'summary': {
@@ -615,4 +680,4 @@ def get_employee_status_data():
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    app.run(debug=True) 
+    socketio.run(app, debug=True)
