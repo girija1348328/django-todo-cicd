@@ -12,7 +12,37 @@ services:
     build:
       context: .
     ports:
-      - 8000:8000
+      - 5000:5000
+
+  server1:
+    build:
+      context: .
+    ports:
+      - 5001:5001    
+
+  server2:
+    build:
+      context: .
+    ports:
+      - 5002:5002
+
+  server3:
+    build:
+      context: .
+    ports:
+      - 5003:5003   
+
+  server4:
+    build:
+      context: .
+    ports:
+      - 5004:5004
+
+  server5:
+    build:
+      context: .
+    ports:
+      - 5005:5005         
 
 # The commented out section below is an example of how to define a PostgreSQL
 # database that your application can use. `depends_on` tells Docker Compose to

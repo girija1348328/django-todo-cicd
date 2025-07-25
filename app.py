@@ -1,6 +1,11 @@
+# import eventlet
+# eventlet.monkey_patch()
+
+import os
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = "0"
+
 from flask import Flask, request, redirect, url_for, flash, jsonify, render_template
 from flask_sqlalchemy import SQLAlchemy
-import os
 import face_recognition
 from werkzeug.utils import secure_filename
 from PIL import Image
@@ -12,6 +17,19 @@ from threading import Thread
 import threading
 import queue
 import dlib
+import urllib.parse
+from mtcnn import MTCNN
+mtcnn_detector = MTCNN()
+from insightface.app import FaceAnalysis
+from flask_migrate import Migrate
+
+print("OpenCV version:", cv2.__version__)
+build_info = cv2.getBuildInformation()
+ffmpeg_support = 'FFMPEG:' in build_info and 'YES' in build_info.split('FFMPEG:')[1].split('\n')[0]
+print("FFMPEG in build info:", ffmpeg_support)
+
+# FFMPEG backend will be used explicitly when opening cameras
+print("FFMPEG backend will be used for RTSP streams")
 
 if getattr(dlib, 'DLIB_USE_CUDA', False):
     print("Running on GPU")
@@ -27,6 +45,7 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['UPLOAD_FOLDER'] = os.path.join('static', 'uploads')
 app.config['DETECTION_COOLDOWN_SECONDS'] = 30  # Time window to prevent duplicate detections
+
 
 # Ensure upload folder exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -46,6 +65,7 @@ def handle_disconnect():
     print('Client disconnected')
 
 db = SQLAlchemy(app)
+migrate = Migrate(app, db)
 
 class Employee(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -53,7 +73,7 @@ class Employee(db.Model):
     employee_id = db.Column(db.String(50), unique=True, nullable=False)
     description = db.Column(db.Text, nullable=True)
     image_filename = db.Column(db.String(200), nullable=False)
-    face_encoding = db.Column(db.PickleType, nullable=False)  # Store numpy array as binary
+    arcface_embedding = db.Column(db.PickleType, nullable=True)  # Store numpy array as binary
 
     def __repr__(self):
         return f'<Employee {self.name}>'
@@ -88,9 +108,161 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+def check_ffmpeg_support():
+    import cv2
+    build_info = cv2.getBuildInformation()
+    # Check for FFMPEG support (can be "FFMPEG: YES" or "FFMPEG: YES (prebuilt binaries)")
+    # The actual format is "      FFMPEG:                      YES (prebuilt binaries)"
+    if 'FFMPEG:' in build_info and 'YES' in build_info.split('FFMPEG:')[1].split('\n')[0]:
+        print("[INFO] OpenCV FFMPEG support detected.")
+        return True
+    else:
+        print("[ERROR] OpenCV is not built with FFMPEG support. RTSP streams will not work.")
+        print("[SOLUTION] Install opencv-python-headless instead of opencv-python")
+        print("[SOLUTION] Run: pip uninstall opencv-python && pip install opencv-python-headless")
+        return False
+
+def check_system_ffmpeg():
+    """Check if FFMPEG is available on the system"""
+    import subprocess
+    try:
+        result = subprocess.run(['ffmpeg', '-version'], 
+                              capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            print("[INFO] System FFMPEG detected")
+            return True
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    
+    # Check for local FFMPEG installation
+    import os
+    local_ffmpeg = os.path.join(os.getcwd(), "ffmpeg", "bin", "ffmpeg.exe")
+    if os.path.exists(local_ffmpeg):
+        try:
+            result = subprocess.run([local_ffmpeg, '-version'], 
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                print("[INFO] Local FFMPEG detected")
+                # Add to PATH for current session
+                ffmpeg_bin = os.path.join(os.getcwd(), "ffmpeg", "bin")
+                if ffmpeg_bin not in os.environ.get('PATH', ''):
+                    os.environ['PATH'] = f"{ffmpeg_bin};{os.environ.get('PATH', '')}"
+                return True
+        except subprocess.TimeoutExpired:
+            pass
+    
+    print("[WARNING] FFMPEG not found on system. RTSP streams may not work properly.")
+    print("[SOLUTION] Install FFMPEG or run the install_ffmpeg_windows.py script")
+    return False
+
+# Check both OpenCV FFMPEG support and system FFMPEG
+opencv_ffmpeg_ok = check_ffmpeg_support()
+system_ffmpeg_ok = check_system_ffmpeg()
+
+if not opencv_ffmpeg_ok:
+    print("[CRITICAL] OpenCV FFMPEG support is required for RTSP streams!")
+    print("[ACTION] Please fix this before using RTSP camera feeds.")
+
+
+def encode_rtsp_url(rtsp_url):
+    # Only encode if credentials are present
+    if 'rtsp://' in rtsp_url:
+        try:
+            prefix, rest = rtsp_url.split('://', 1)
+            if '@' in rest:
+                creds, path = rest.split('@', 1)
+                if ':' in creds:
+                    user, pwd = creds.split(':', 1)
+                    user_enc = urllib.parse.quote(user)
+                    pwd_enc = urllib.parse.quote(pwd)
+                    return f"{prefix}://{user_enc}:{pwd_enc}@{path}"
+        except Exception as e:
+            print(f"[WARN] Could not encode RTSP credentials: {e}")
+    return rtsp_url
+
 @app.route('/')
 def home():
     return redirect('/live_detection_page')
+
+# Add a new column to Employee for ArcFace embedding (if not already present)
+# If using Alembic or migrations, this should be handled there. For now, add in-memory only for demonstration.
+if not hasattr(Employee, 'arcface_embedding'):
+    from sqlalchemy import PickleType
+    Employee.arcface_embedding = db.Column(PickleType, nullable=True)
+
+# Initialize ArcFace model globally
+arcface_app = FaceAnalysis(name='buffalo_l')
+arcface_app.prepare(ctx_id=0, det_size=(640, 640))
+
+# Helper to extract ArcFace embedding from a face crop
+import cv2
+import numpy as np
+
+def extract_arcface_embedding_from_crop(face_crop):
+    faces = arcface_app.get(face_crop)
+    if faces and hasattr(faces[0], 'embedding'):
+        return faces[0].embedding
+    return None
+
+def extract_arcface_embedding(image_path):
+    img = cv2.imread(image_path)
+    if img is None:
+        print(f"[DEBUG] Could not read image: {image_path}")
+        return None
+
+    # Convert grayscale to RGB if needed
+    if len(img.shape) == 2 or img.shape[2] == 1:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+
+    # Robust preprocessing: histogram equalization, denoising, sharpening
+    try:
+        img_yuv = cv2.cvtColor(img, cv2.COLOR_BGR2YUV)
+        img_yuv[:,:,0] = cv2.equalizeHist(img_yuv[:,:,0])
+        img = cv2.cvtColor(img_yuv, cv2.COLOR_YUV2BGR)
+    except Exception as e:
+        print(f"[DEBUG] Histogram equalization failed: {e}")
+
+    try:
+        img = cv2.fastNlMeansDenoisingColored(img, None, 10, 10, 7, 21)
+    except Exception as e:
+        print(f"[DEBUG] Denoising failed: {e}")
+
+    # Sharpening
+    try:
+        kernel = np.array([[0, -1, 0], [-1, 5,-1], [0, -1, 0]])
+        img = cv2.filter2D(img, -1, kernel)
+    except Exception as e:
+        print(f"[DEBUG] Sharpening failed: {e}")
+
+    # Resize very large images for better detection
+    max_dim = max(img.shape[:2])
+    if max_dim > 1200:
+        scale = 1200.0 / max_dim
+        img = cv2.resize(img, (int(img.shape[1]*scale), int(img.shape[0]*scale)))
+
+    # Resize very small images up to 300px minimum
+    min_dim = min(img.shape[:2])
+    if min_dim < 300:
+        scale = 300.0 / min_dim
+        img = cv2.resize(img, (int(img.shape[1]*scale), int(img.shape[0]*scale)))
+
+    rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    try:
+        detections = mtcnn_detector.detect_faces(rgb_img)
+    except Exception as e:
+        print(f"[ERROR] MTCNN detection failed: {e}")
+        return None
+    print(f"[DEBUG] MTCNN detections: {detections}")
+    if not detections:
+        debug_path = image_path.replace('.jpg', '_debug.jpg').replace('.jpeg', '_debug.jpeg').replace('.png', '_debug.png')
+        cv2.imwrite(debug_path, img)
+        print(f"[DEBUG] No face detected. Saved debug image to: {debug_path}")
+        return None
+    # Use the first detected face
+    x, y, w, h = detections[0]['box']
+    x, y = max(0, x), max(0, y)
+    face_crop = img[y:y+h, x:x+w]
+    return extract_arcface_embedding_from_crop(face_crop)
 
 @app.route('/add_employee', methods=['POST'])
 def add_employee():
@@ -106,29 +278,37 @@ def add_employee():
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     file.save(filepath)
 
-    # Load image and encode face
-    image = face_recognition.load_image_file(filepath)
-    encodings = face_recognition.face_encodings(image)
-    if not encodings:
-        os.remove(filepath)
+    arcface_embedding = extract_arcface_embedding(filepath)
+    if arcface_embedding is None:
+        import time
+        for _ in range(5):
+            try:
+                os.remove(filepath)
+                break
+            except PermissionError:
+                time.sleep(0.2)
         return jsonify({'status': 'error', 'message': 'No face detected in image'}), 400
-    face_encoding = encodings[0]
 
-    # Store in DB
     try:
         employee = Employee(
             name=name,
             employee_id=employee_id,
             description=description,
             image_filename=filename,
-            face_encoding=face_encoding
+            arcface_embedding=arcface_embedding
         )
         db.session.add(employee)
         db.session.commit()
         return jsonify({'status': 'success', 'message': 'Employee added successfully'})
     except Exception as e:
         if os.path.exists(filepath):
-            os.remove(filepath)
+            import time
+            for _ in range(5):
+                try:
+                    os.remove(filepath)
+                    break
+                except PermissionError:
+                    time.sleep(0.2)
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/employees', methods=['GET'])
@@ -161,20 +341,17 @@ def edit_employee(employee_id):
         employee.description = description
 
     if file and hasattr(file, 'filename') and file.filename and allowed_file(file.filename):
-        # Remove old image
         old_path = os.path.join(app.config['UPLOAD_FOLDER'], employee.image_filename)
         if os.path.exists(old_path):
             os.remove(old_path)
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
-        # Re-encode face
-        image = face_recognition.load_image_file(filepath)
-        encodings = face_recognition.face_encodings(image)
-        if not encodings:
+        arcface_embedding = extract_arcface_embedding(filepath)
+        if arcface_embedding is None:
             os.remove(filepath)
             return jsonify({'status': 'error', 'message': 'No face detected in new image'}), 400
-        employee.face_encoding = encodings[0]
+        employee.arcface_embedding = arcface_embedding
         employee.image_filename = filename
 
     try:
@@ -209,6 +386,14 @@ def upload_video():
     # Do not process video here, just return filename for live detection
     return jsonify({'status': 'success', 'video_filename': filename})
 
+def cosine_similarity(a, b):
+    from numpy import dot
+    from numpy.linalg import norm
+    if a is None or b is None:
+        return 0.0
+    return float(dot(a, b) / (norm(a) * norm(b)))
+
+# Update gen_frames to use MTCNN for detection and ArcFace for recognition only
 def gen_frames(video_filename=None, camera_feed_id=None):
     ctx = app.app_context()
     ctx.push()
@@ -216,9 +401,8 @@ def gen_frames(video_filename=None, camera_feed_id=None):
     frame_queue = queue.Queue(maxsize=1)
     stop_event = threading.Event()
     try:
-        # Load all employee encodings
         employees = Employee.query.all()
-        known_encodings = [e.face_encoding for e in employees]
+        known_arcface_embeddings = [getattr(e, 'arcface_embedding', None) for e in employees]
         known_names = [e.name for e in employees]
 
         if camera_feed_id:
@@ -241,7 +425,26 @@ def gen_frames(video_filename=None, camera_feed_id=None):
                 except ValueError:
                     camera = find_available_camera()
             else:
-                camera = cv2.VideoCapture(camera_feed.camera_url)
+                rtsp_url = camera_feed.camera_url
+                rtsp_url = encode_rtsp_url(rtsp_url)
+                if "rtsp://" in rtsp_url and "rtsp_transport" not in rtsp_url:
+                    sep = '&' if '?' in rtsp_url else '?'
+                    rtsp_url += f"{sep}rtsp_transport=tcp"
+                print(f"[DEBUG] Attempting to open RTSP stream: {rtsp_url}")
+                camera = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+                retry_count = 0
+                max_retries = 5
+                while (camera is None or not camera.isOpened()) and retry_count < max_retries:
+                    print(f"[WARN] Failed to open RTSP stream. Retrying {retry_count+1}/{max_retries}...")
+                    time.sleep(2)
+                    camera = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+                    retry_count += 1
+                if camera is None or not camera.isOpened():
+                    error_frame = generate_error_frame("Camera not available (RTSP connect failed)")
+                    ret, buffer = cv2.imencode('.jpg', error_frame)
+                    frame_bytes = buffer.tobytes()
+                    yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                    return
         elif video_filename:
             video_path = os.path.join(app.config['UPLOAD_FOLDER'], video_filename)
             camera = cv2.VideoCapture(video_path)
@@ -257,74 +460,79 @@ def gen_frames(video_filename=None, camera_feed_id=None):
 
         def camera_worker():
             with app.app_context():
-                detected_today = set()
                 frame_count = 0
                 start_time = time.time()
                 fps = 0.0
-                process_every_n = 3
-                last_face_locations = []
-                last_face_encodings = []
+                process_every_n = 5  # Increased for speed
+                last_boxes = []
                 last_names = []
                 last_confidences = []
+
+                if not camera.isOpened():
+                    print("[ERROR] Camera stream could not be opened. Check RTSP URL, credentials, and permissions.")
+                    error_frame = generate_error_frame("Camera not available (RTSP connect failed)")
+                    ret, buffer = cv2.imencode('.jpg', error_frame)
+                    frame_bytes = buffer.tobytes()
+                    frame_queue.put(error_frame)
+                    return
+
                 while not stop_event.is_set():
                     success, frame = camera.read()
                     if not success or frame is None:
+                        time.sleep(0.01)
                         continue
                     frame_count += 1
                     process_this_frame = (frame_count % process_every_n == 0)
                     if process_this_frame:
-                        # Resize frame for faster processing
-                        small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
+                        # Resize for faster detection
+                        scale = 0.5
+                        small_frame = cv2.resize(frame, (0, 0), fx=scale, fy=scale)
                         rgb_small_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
-                        last_face_locations = face_recognition.face_locations(rgb_small_frame)
-                        last_face_encodings = face_recognition.face_encodings(rgb_small_frame, last_face_locations)
-                        last_names = []
-                        last_confidences = []
-                        for face_encoding in last_face_encodings:
-                            matches = face_recognition.compare_faces(known_encodings, face_encoding, tolerance=0.5)
+                        detections = mtcnn_detector.detect_faces(rgb_small_frame)
+                        height, width = frame.shape[:2]
+                        boxes = []
+                        names = []
+                        confidences = []
+                        for det in detections:
+                            x, y, w, h = det['box']
+                            # Scale coordinates back up
+                            x = int(x / scale)
+                            y = int(y / scale)
+                            w = int(w / scale)
+                            h = int(h / scale)
+                            # Clamp to image boundaries
+                            x = max(0, x)
+                            y = max(0, y)
+                            x2 = min(x + w, width)
+                            y2 = min(y + h, height)
+                            if w < 30 or h < 30:
+                                continue  # Skip tiny detections
+                            face_crop = frame[y:y2, x:x2]
+                            embedding = extract_arcface_embedding_from_crop(face_crop)
                             name = "Unknown"
                             confidence = 0.0
-                            for idx, match in enumerate(matches):
-                                if match:
+                            if embedding is not None:
+                                sims = [cosine_similarity(embedding, kemb) for kemb in known_arcface_embeddings]
+                                if sims and max(sims) > 0.4:
+                                    idx = sims.index(max(sims))
                                     name = known_names[idx]
-                                    face_distances = face_recognition.face_distance(known_encodings, face_encoding)
-                                    confidence = 1 - face_distances[idx]
-                                    today = datetime.utcnow().date()
-                                    recent_attendance = AttendanceLog.query.filter(
-                                        AttendanceLog.employee_name == name,
-                                        db.func.date(AttendanceLog.timestamp) == today
-                                    ).first()
-                                    if not recent_attendance:
-                                        log = AttendanceLog(
-                                            employee_name=name,
-                                            attendance_type='live' if camera_feed_id else 'cctv',
-                                            camera_feed_id=camera_feed_id,
-                                            camera_feed_name=camera_feed.name if camera_feed_id else None,
-                                            confidence_score=confidence
-                                        )
-                                        db.session.add(log)
-                                        db.session.commit()
-                                        detected_today.add(name)
-                                    break
-                            last_names.append(name)
-                            last_confidences.append(confidence)
-                    # Draw boxes and labels using last results, scale up coordinates
-                    for (top, right, bottom, left), name, confidence in zip(last_face_locations, last_names, last_confidences):
-                        top *= 4
-                        right *= 4
-                        bottom *= 4
-                        left *= 4
-                        color = (0, 0, 255) if name != "Unknown" else (0, 255, 0)
-                        cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
+                                    confidence = max(sims)
+                            boxes.append((x, y, x2, y2))
+                            names.append(name)
+                            confidences.append(confidence)
+                        last_boxes = boxes
+                        last_names = names
+                        last_confidences = confidences
+                    # Draw boxes and labels
+                    for (x1, y1, x2, y2), name, confidence in zip(last_boxes, last_names, last_confidences):
+                        color = (255, 0, 0) if name != "Unknown" else (0, 255, 255)
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
                         label = f"{name} ({confidence:.2f})" if name != "Unknown" else name
-                        cv2.putText(frame, label, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+                        cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
                     # FPS calculation
                     elapsed_time = time.time() - start_time
                     if elapsed_time > 0:
                         fps = frame_count / elapsed_time
-                    # Optionally, display FPS (uncomment to show)
-                    # cv2.putText(frame, f"FPS: {fps:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-                    # Put the latest frame in the queue (replace old frame)
                     if not frame_queue.empty():
                         try:
                             frame_queue.get_nowait()
@@ -342,7 +550,6 @@ def gen_frames(video_filename=None, camera_feed_id=None):
                 frame_bytes = buffer.tobytes()
                 yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
             except queue.Empty:
-                # If no frame is available, yield an error frame
                 error_frame = generate_error_frame("Waiting for camera...")
                 ret, buffer = cv2.imencode('.jpg', error_frame)
                 frame_bytes = buffer.tobytes()
@@ -582,7 +789,7 @@ def test_camera_feed(camera_feed_id):
                 if camera is None:
                     return jsonify({'status': 'error', 'message': 'No camera devices available'}), 400
         else:
-            camera = cv2.VideoCapture(camera_feed.camera_url)
+            camera = cv2.VideoCapture(camera_feed.camera_url, cv2.CAP_FFMPEG)
 
         if camera is None or not camera.isOpened():
             return jsonify({'status': 'error', 'message': 'Cannot connect to camera feed'}), 400
@@ -676,8 +883,8 @@ def get_employee_status_data():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
+    
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    socketio.run(app, debug=True)
+    socketio.run(app, debug=True) # host='0.0.0.0', port=5000, use_reloader=False

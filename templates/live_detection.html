@@ -1,719 +1,88 @@
 {% extends 'base.html' %}
 {% block content %}
-<h2>Live Detection</h2>
-<div class="row mt-3">
-  <!-- Video Feed Column -->
-  <div class="col-md-8">
-    <div class="card">
-      <div class="card-header bg-dark text-white">
-        <h5 class="mb-0">
-          <i class="fas fa-video"></i> Live Camera Feed
-        </h5>
-      </div>
-      <div class="card-body">
-        <div id="videoAlert" class="alert alert-warning d-none">No webcam detected and no video uploaded. Please upload a video for detection.</div>
-        <img id="live-video" class="img-fluid border d-none" alt="Live Video Stream">
-        
-        <!-- Camera Feed Selector -->
-        <div class="mt-3">
-          <label for="cameraFeedSelect" class="form-label"><i class="fas fa-camera"></i> Select Camera Feed</label>
-          <select id="cameraFeedSelect" class="form-select mb-2" style="max-width: 400px;"></select>
-        </div>
-        
-        <!-- Camera Control Buttons -->
-        <div class="mt-3 text-center">
-          <div class="row justify-content-center">
-            <div class="col-auto">
-              <button id="startCamera" class="btn btn-success btn-lg me-2">
-                <i class="fas fa-play"></i> Start Camera
-              </button>
-              <button id="stopCamera" class="btn btn-danger btn-lg" disabled>
-                <i class="fas fa-stop"></i> Stop Camera
-              </button>
+<h2 class="mb-4">Live Detection Grid</h2>
+
+<!-- Camera Grid -->
+<div class="row" id="cameraGrid">
+    <!-- Camera feeds will be inserted here by JavaScript -->
+</div>
+
+<!-- Recent Detections Panel -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="fas fa-users"></i> Recent Detections</h5>
             </div>
-          </div>
-          <div class="mt-2">
-            <small class="text-muted">
-              <i class="fas fa-clock"></i> Current Time: <span id="currentTime">-</span>
-            </small>
-          </div>
+            <div class="card-body" style="max-height: 400px; overflow-y: auto;">
+                <div id="recentDetectionsPanel">
+                    <p class="text-muted">No detections yet</p>
+                </div>
+            </div>
         </div>
-        
-        <!-- Camera Status -->
-        <div class="mt-3">
-          <div id="cameraStatus" class="alert alert-info d-none">
-            <i class="fas fa-info-circle"></i> Camera Status: <span id="statusText">Ready</span>
-          </div>
-          <div id="cameraSource" class="small text-muted d-none">
-            <i class="fas fa-link"></i> Source: <span id="sourceText">-</span>
-          </div>
-          <div id="detectionInfo" class="small text-muted mt-2">
-            <i class="fas fa-clock"></i> Detection Cooldown: <span id="cooldownText">30 seconds</span>
-            <br>
-            <small class="text-info">Same person won't be logged again within this time window</small>
-          </div>
-        </div>
-      </div>
     </div>
-  </div>
-  <!-- Recent Detections Panel -->
-  <div class="col-md-4">
-    <div class="card">
-      <div class="card-header bg-primary text-white">
-        <h5 class="mb-0"><i class="fas fa-users"></i> Recent Detections</h5>
-      </div>
-      <div class="card-body" style="max-height: 500px; overflow-y: auto;">
-        <div id="recentDetectionsPanel">
-          <p class="text-muted">No detections yet</p>
-        </div>
-      </div>
-    </div>
-  </div>
 </div>
 
 <script>
-// Get video filename from query string
-function getQueryParam(name) {
-  const url = new URL(window.location.href);
-  return url.searchParams.get(name);
-}
-
-const videoParam = getQueryParam('video');
-const cameraFeedIdParam = getQueryParam('camera_feed_id');
-const autoStartParam = getQueryParam('auto_start');
-const img = document.getElementById('live-video');
-const alertDiv = document.getElementById('videoAlert');
-const startBtn = document.getElementById('startCamera');
-const stopBtn = document.getElementById('stopCamera');
-const cameraStatus = document.getElementById('cameraStatus');
-const statusText = document.getElementById('statusText');
-const cameraSource = document.getElementById('cameraSource');
-const sourceText = document.getElementById('sourceText');
-const currentTimeElement = document.getElementById('currentTime');
-const cameraFeedSelect = document.getElementById('cameraFeedSelect');
-
-let isCameraRunning = false;
-let currentVideoSource = '';
-let cameraFeeds = [];
-
-function showAlert() {
-  img.classList.add('d-none');
-  alertDiv.classList.remove('d-none');
-  updateCameraStatus('No camera available', 'warning');
-}
-
-function showVideo() {
-  img.classList.remove('d-none');
-  alertDiv.classList.add('d-none');
-  updateCameraStatus('Camera active', 'success');
-}
-
-function updateCameraStatus(message, type) {
-  statusText.textContent = message;
-  cameraStatus.className = `alert alert-${type} d-none`;
-  cameraStatus.classList.remove('d-none');
-}
-
 function loadCameraFeeds() {
-  fetch('/camera_feeds')
-    .then(res => res.json())
-    .then(data => {
-      cameraFeeds = data.filter(f => f.is_active);
-      cameraFeedSelect.innerHTML = '';
-      if (cameraFeeds.length === 0) {
-        cameraFeedSelect.innerHTML = '<option value="">No camera feeds (using webcam)</option>';
-      } else {
-        cameraFeeds.forEach((feed, idx) => {
-          const option = document.createElement('option');
-          option.value = feed.id;
-          option.textContent = `${feed.name} (${feed.camera_type.toUpperCase()})`;
-          cameraFeedSelect.appendChild(option);
+    fetch('/camera_feeds')
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Network response was not ok');
+            }
+            return response.json();
+        })
+        .then(feeds => {
+            const activeFeeds = feeds.filter(feed => feed.is_active);
+            const grid = document.getElementById('cameraGrid');
+            grid.innerHTML = ''; // Clear existing content
+
+            if (activeFeeds.length === 0) {
+                grid.innerHTML = `
+                    <div class="col-12">
+                        <div class="alert alert-warning" role="alert">
+                            <strong>No active camera feeds.</strong> Please add and activate a camera from the Camera Feeds page.
+                        </div>
+                    </div>`;
+                return;
+            }
+
+            // Create the 3x3 grid
+            activeFeeds.forEach(feed => {
+                const col = document.createElement('div');
+                // Use col-lg-4 for large screens, col-md-6 for medium
+                col.className = 'col-lg-4 col-md-6 mb-4';
+                
+                col.innerHTML = `
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <strong class="text-truncate" title="${feed.name}">${feed.name}</strong>
+                            <span class="badge bg-secondary">${feed.location || 'N/A'}</span>
+                        </div>
+                        <div class="card-body p-1 d-flex align-items-center justify-content-center bg-dark">
+                            <img src="/live_detection?camera_feed_id=${feed.id}" 
+                                 class="img-fluid" 
+                                 style="max-height: 280px; width: 100%; object-fit: contain;" 
+                                 alt="Live feed for ${feed.name}"
+                                 onerror="this.onerror=null; this.src='/static/placeholder.jpg'; this.alt='Error loading feed.';">
+                        </div>
+                    </div>
+                `;
+                grid.appendChild(col);
+            });
+        })
+        .catch(error => {
+            console.error('Error fetching camera feeds:', error);
+            const grid = document.getElementById('cameraGrid');
+            grid.innerHTML = `
+                <div class="col-12">
+                    <div class="alert alert-danger" role="alert">
+                        <strong>Error:</strong> Could not load camera feeds. Please ensure the server is running and check the console for details.
+                    </div>
+                </div>`;
         });
-        // Auto-select if only one feed
-        if (cameraFeeds.length === 1) {
-          cameraFeedSelect.selectedIndex = 0;
-        }
-        // Auto-select from URL param if present
-        if (cameraFeedIdParam) {
-          cameraFeedSelect.value = cameraFeedIdParam;
-        }
-      }
-      // Auto-start detection if requested
-      if (autoStartParam === '1' && cameraFeedIdParam) {
-        setTimeout(() => {
-          startBtn.click();
-        }, 500);
-      }
-    })
-    .catch(error => {
-      cameraFeedSelect.innerHTML = '<option value="">Error loading feeds</option>';
-    });
 }
 
-function startCamera() {
-  if (isCameraRunning) return;
-  updateCameraStatus('Starting camera...', 'info');
-  let selectedFeedId = cameraFeedSelect.value;
-  if (selectedFeedId) {
-    currentVideoSource = `/live_detection?camera_feed_id=${selectedFeedId}`;
-    const selectedFeed = cameraFeeds.find(f => f.id == selectedFeedId);
-    sourceText.textContent = selectedFeed ? `${selectedFeed.name} (${selectedFeed.camera_type.toUpperCase()})` : 'Selected camera feed';
-  } else if (videoParam) {
-    currentVideoSource = `/live_detection?video=${encodeURIComponent(videoParam)}`;
-    sourceText.textContent = `Uploaded video: ${videoParam}`;
-  } else {
-    currentVideoSource = '/live_detection';
-    sourceText.textContent = 'Live webcam';
-  }
-  img.src = currentVideoSource;
-  isCameraRunning = true;
-  startBtn.disabled = true;
-  stopBtn.disabled = false;
-  startBtn.classList.remove('btn-success');
-  startBtn.classList.add('btn-secondary');
-  stopBtn.classList.remove('btn-secondary');
-  stopBtn.classList.add('btn-danger');
-  cameraSource.classList.remove('d-none');
-  updateCameraStatus('Camera running', 'success');
-}
-
-function stopCamera() {
-  if (!isCameraRunning) return;
-  updateCameraStatus('Stopping camera...', 'info');
-  img.src = '';
-  isCameraRunning = false;
-  startBtn.disabled = false;
-  stopBtn.disabled = true;
-  startBtn.classList.remove('btn-secondary');
-  startBtn.classList.add('btn-success');
-  stopBtn.classList.remove('btn-danger');
-  stopBtn.classList.add('btn-secondary');
-  cameraSource.classList.add('d-none');
-  updateCameraStatus('Camera stopped', 'warning');
-  showAlert();
-}
-
-startBtn.addEventListener('click', startCamera);
-stopBtn.addEventListener('click', stopCamera);
-
-img.onerror = function() {
-  if (isCameraRunning) {
-    isCameraRunning = false;
-    startBtn.disabled = false;
-    stopBtn.disabled = true;
-    startBtn.classList.remove('btn-secondary');
-    startBtn.classList.add('btn-success');
-    stopBtn.classList.remove('btn-danger');
-    stopBtn.classList.add('btn-secondary');
-    updateCameraStatus('Camera error - please try again', 'danger');
-  }
-  showAlert();
-};
-
-img.onload = function() {
-  if (isCameraRunning) {
-    showVideo();
-  }
-};
-
-function updateCurrentTime() {
-  const now = new Date();
-  currentTimeElement.textContent = now.toLocaleTimeString();
-}
-setInterval(updateCurrentTime, 1000);
-updateCurrentTime();
-
-function loadDetectionConfig() {
-  fetch('/detection_config')
-    .then(res => res.json())
-    .then(data => {
-      const cooldownText = document.getElementById('cooldownText');
-      if (cooldownText) {
-        cooldownText.textContent = `${data.cooldown_seconds} seconds`;
-      }
-    })
-    .catch(error => {
-      console.error('Error loading detection config:', error);
-    });
-}
-
-updateCameraStatus('Ready to start', 'info');
-loadDetectionConfig();
-loadCameraFeeds();
-
-// Detection logs functionality
-let attendanceLogs = [];
-let employeeImages = {};
-let previousLogCount = 0;
-
-// Fetch attendance logs
-function fetchAttendanceLogs() {
-  fetch('/attendance_logs')
-    .then(res => res.json())
-    .then(data => {
-      // Check if there are new detections
-      if (data.length > previousLogCount && previousLogCount > 0) {
-        const newDetections = data.slice(0, data.length - previousLogCount);
-        showAttendanceNotification(newDetections);
-      }
-      
-      attendanceLogs = data;
-      previousLogCount = data.length;
-      renderAttendanceLogs();
-    })
-    .catch(error => {
-      console.error('Error fetching attendance logs:', error);
-    });
-}
-
-// Show notification for new detections
-function showAttendanceNotification(newDetections) {
-  newDetections.forEach(attendance => {
-    const notification = document.createElement('div');
-    notification.className = 'alert alert-danger alert-dismissible fade show position-fixed';
-    notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
-    notification.innerHTML = `
-      <strong><i class="fas fa-exclamation-triangle"></i> Employee Detected!</strong>
-      <br>
-      <strong>${attendance.employee_name}</strong> detected at ${attendance.timestamp}
-      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    `;
-    document.body.appendChild(notification);
-    
-    // Auto-remove after 5 seconds
-    setTimeout(() => {
-      if (notification.parentNode) {
-        notification.remove();
-      }
-    }, 5000);
-  });
-}
-
-// Show cooldown notification
-function showCooldownNotification(employeeName) {
-  const notification = document.createElement('div');
-  notification.className = 'alert alert-warning alert-dismissible fade show position-fixed';
-  notification.style.cssText = 'top: 80px; right: 20px; z-index: 9999; min-width: 300px;';
-  notification.innerHTML = `
-    <strong><i class="fas fa-clock"></i> Detection Skipped</strong>
-    <br>
-    <strong>${employeeName}</strong> was detected but not logged (cooldown period)
-    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-  `;
-  document.body.appendChild(notification);
-  
-  // Auto-remove after 3 seconds
-  setTimeout(() => {
-    if (notification.parentNode) {
-      notification.remove();
-    }
-  }, 3000);
-}
-
-// Fetch employee images
-function fetchEmployeeImages() {
-  fetch('/employees')
-    .then(res => res.json())
-    .then(data => {
-      data.forEach(employee => {
-        employeeImages[employee.name] = employee.image_url;
-      });
-    })
-    .catch(error => {
-      console.error('Error fetching employee images:', error);
-    });
-}
-
-// Render attendance logs with images
-function renderAttendanceLogs() {
-  const logsContainer = document.getElementById('detection-logs');
-  
-  if (!attendanceLogs || attendanceLogs.length === 0) {
-    logsContainer.innerHTML = `
-      <div class="text-center text-muted">
-        <i class="fas fa-user-slash fa-2x mb-2"></i>
-        <p class="mt-2">No attendance logs yet</p>
-        <small>Attendance logs will appear here when employees are identified</small>
-      </div>
-    `;
-    return;
-  }
-  
-  // Get the 10 most recent detections
-  const recentDetections = attendanceLogs.slice(0, 10);
-  
-  // Update detection count and delete all button
-  const countElement = document.getElementById('detection-count');
-  const deleteAllBtn = document.getElementById('deleteAllBtn');
-  
-  if (countElement) {
-    countElement.textContent = recentDetections.length;
-  }
-  
-  if (deleteAllBtn) {
-    deleteAllBtn.disabled = recentDetections.length === 0;
-  }
-  
-  logsContainer.innerHTML = recentDetections.map((log, index) => {
-    if (!log || !log.detection_type) return '';
-    const imageUrl = log.image_url || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iODAiIHZpZXdCb3g9IjAgMCA4MCA4MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjgwIiBmaWxsPSIjRjVGNUY1Ii8+CjxwYXRoIGQ9Ik00MCA0MEM0My4zMTM3IDQwIDQ2IDM3LjMxMzcgNDYgMzRDNDYgMzAuNjg2MyA0My4zMTM3IDI4IDQwIDI4QzM2LjY4NjMgMjggMzQgMzAuNjg2MyAzNCAzNEMzNCAzNy4zMTM3IDM2LjY4NjMgNDAgNDAgNDBaIiBmaWxsPSIjQ0NDIi8+CjxwYXRoIGQ9Ik00MCA0NkM0Ny4xNzkgNDYgNTMgNDAuMTc5IDUzIDMzSDUwQzUwIDM4LjUyMiA0NS41MjIgNDMgNDAgNDNDMzQuNDc4IDQzIDMwIDM4LjUyMiAzMCAzM0gyN0MyNyA0MC4xNzkgMzIuODIxIDQ2IDQwIDQ2WiIgZmlsbD0iI0NDQyIvPgo8L3N2Zz4K';
-    const detectionType = log.detection_type.charAt(0).toUpperCase() + log.detection_type.slice(1);
-    // Highlight CCTV detections
-    const isCCTV = log.detection_type === 'cctv';
-    return `
-      <div class="attendance-item mb-3 p-3 border rounded${isCCTV ? ' bg-info bg-opacity-10 border-info' : ''}" data-attendance-id="${log.id}">
-        <div class="row">
-          <div class="col-3">
-            <img src="${imageUrl}" 
-                 alt="${log.employee_name}" 
-                 class="img-fluid rounded" 
-                 style="width: 80px; height: 80px; object-fit: cover;"
-                 onerror="this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iODAiIHZpZXdCb3g9IjAgMCA4MCA4MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjgwIiBmaWxsPSIjRjVGNUY1Ii8+CjxwYXRoIGQ9Ik00MCA0MEM0My4zMTM3IDQwIDQ2IDM3LjMxMzcgNDYgMzRDNDYgMzAuNjg2MyA0My4zMTM3IDI4IDQwIDI4QzM2LjY4NjMgMjggMzQgMzAuNjg2MyAzNCAzNEMzNCAzNy4zMTM3IDM2LjY4NjMgNDAgNDAgNDBaIiBmaWxsPSIjQ0NDIi8+CjxwYXRoIGQ9Ik00MCA0NkM0Ny4xNzkgNDYgNTMgNDAuMTc5IDUzIDMzSDUwQzUwIDM4LjUyMiA0NS41MjIgNDMgNDAgNDNDMzQuNDc4IDQzIDMwIDM4LjUyMiAzMCAzM0gyN0MyNyA0MC4xNzkgMzIuODIxIDQ2IDQwIDQ2WiIgZmlsbD0iI0NDQyIvPgo8L3N2Zz4K'">
-          </div>
-          <div class="col-6">
-            <h6 class="mb-1 text-danger fw-bold">${log.employee_name}</h6>
-            <p class="mb-1 small text-muted">${log.timestamp}</p>
-            <span class="badge ${isCCTV ? 'bg-info text-dark border border-info' : 'bg-' + getDetectionTypeColor(log.detection_type)}">${detectionType}${isCCTV ? ' (CCTV)' : ''}</span>
-          </div>
-          <div class="col-3 text-end">
-            <button class="btn btn-outline-danger btn-sm delete-attendance" 
-                    data-attendance-id="${log.id}" 
-                    title="Delete this attendance">
-              <i class="fas fa-trash"></i>
-            </button>
-          </div>
-        </div>
-      </div>
-    `;
-  }).join('');
-}
-
-// Get color for detection type
-function getDetectionTypeColor(type) {
-  switch(type) {
-    case 'live': return 'danger';
-    case 'video': return 'warning';
-    case 'cctv': return 'info';
-    default: return 'secondary';
-  }
-}
-
-// Auto-refresh attendance logs every 5 seconds
-function startAutoRefresh() {
-  setInterval(() => {
-    fetchAttendanceLogs();
-  }, 5000);
-}
-
-// Delete individual attendance
-function deleteAttendance(index) {
-  const attendance = attendanceLogs[index];
-  if (!attendance || !attendance.id) {
-    showNotification('Error: Attendance not found', 'danger');
-    return;
-  }
-  
-  if (!confirm('Are you sure you want to delete this attendance?')) {
-    return;
-  }
-  
-  // Find and disable the delete button
-  const deleteButton = document.querySelector(`[data-attendance-id="${attendance.id}"]`);
-  if (deleteButton) {
-    deleteButton.disabled = true;
-    deleteButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-  }
-  
-  // Delete from database
-  fetch(`/delete_attendance_log/${attendance.id}`, {
-    method: 'DELETE',
-    headers: {
-      'Content-Type': 'application/json',
-    }
-  })
-  .then(response => response.json())
-  .then(data => {
-    if (data.status === 'success') {
-      // Remove from local array
-      attendanceLogs.splice(index, 1);
-      // Update display
-      fetchAttendanceLogs(); // Always refetch from backend after delete
-      showNotification('Attendance deleted successfully', 'success');
-    } else {
-      showNotification('Error deleting attendance: ' + data.message, 'danger');
-      // Re-enable button on error
-      if (deleteButton) {
-        deleteButton.disabled = false;
-        deleteButton.innerHTML = '<i class="fas fa-trash"></i>';
-      }
-    }
-  })
-  .catch(error => {
-    console.error('Error:', error);
-    showNotification('Error deleting attendance', 'danger');
-    // Re-enable button on error
-    if (deleteButton) {
-      deleteButton.disabled = false;
-      deleteButton.innerHTML = '<i class="fas fa-trash"></i>';
-    }
-  });
-}
-
-// Delete all attendance
-function deleteAllAttendance() {
-  if (!confirm('Are you sure you want to delete ALL attendance? This action cannot be undone.')) {
-    return;
-  }
-  
-  // Disable delete all button and show loading
-  const deleteAllBtn = document.getElementById('deleteAllBtn');
-  if (deleteAllBtn) {
-    deleteAllBtn.disabled = true;
-    deleteAllBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
-  }
-  
-  // Delete all from database
-  fetch('/delete_all_attendance_logs', {
-    method: 'DELETE',
-    headers: {
-      'Content-Type': 'application/json',
-    }
-  })
-  .then(response => response.json())
-  .then(data => {
-    if (data.status === 'success') {
-      // Clear local array
-      attendanceLogs = [];
-      // Update display
-      renderAttendanceLogs();
-      showNotification('All attendance deleted successfully', 'success');
-    } else {
-      showNotification('Error deleting all attendance: ' + data.message, 'danger');
-      // Re-enable button on error
-      if (deleteAllBtn) {
-        deleteAllBtn.disabled = false;
-        deleteAllBtn.innerHTML = '<i class="fas fa-trash"></i> Delete All';
-      }
-    }
-  })
-  .catch(error => {
-    console.error('Error:', error);
-    showNotification('Error deleting all attendance', 'danger');
-    // Re-enable button on error
-    if (deleteAllBtn) {
-      deleteAllBtn.disabled = false;
-      deleteAllBtn.innerHTML = '<i class="fas fa-trash"></i> Delete All';
-    }
-  });
-}
-
-// Show notification
-function showNotification(message, type) {
-  const notification = document.createElement('div');
-  notification.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
-  notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
-  notification.innerHTML = `
-    <strong><i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-triangle'}"></i> ${message}</strong>
-    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-  `;
-  document.body.appendChild(notification);
-  
-  // Auto-remove after 3 seconds
-  setTimeout(() => {
-    if (notification.parentNode) {
-      notification.remove();
-    }
-  }, 3000);
-}
-
-let employeeInfoMap = {};
-
-// Fetch employee info and build a lookup map
-function fetchEmployeeInfoMap() {
-  return fetch('/employees')
-    .then(res => res.json())
-    .then(data => {
-      employeeInfoMap = {};
-      data.forEach(emp => {
-        // Use trimmed, lowercased name as key for robust matching
-        employeeInfoMap[emp.name.trim().toLowerCase()] = emp;
-      });
-    });
-}
-
-// --- Recent Detections Panel Logic ---
-function renderRecentDetections(logs) {
-  const panel = document.getElementById('recentDetectionsPanel');
-  if (!logs || logs.length === 0) {
-    panel.innerHTML = '<p class="text-muted">No detections yet</p>';
-    return;
-  }
-  // Only show logs for employees that exist in employeeInfoMap
-  const filteredLogs = logs.filter(log => {
-    const key = log.employee_name ? log.employee_name.trim().toLowerCase() : '';
-    return !!employeeInfoMap[key];
-  });
-  if (filteredLogs.length === 0) {
-    panel.innerHTML = '<p class="text-muted">No detections yet</p>';
-    return;
-  }
-  panel.innerHTML = filteredLogs.map(log => {
-    let emp = employeeInfoMap[log.employee_name ? log.employee_name.trim().toLowerCase() : ''];
-    let imageUrl = (emp && emp.image_url) || log.image_url || '/static/uploads/default.jpg';
-    let displayName = (emp && emp.name) || log.employee_name || 'Unknown';
-    return `
-      <div class="d-flex align-items-center mb-3">
-        <img src="${imageUrl}" alt="${displayName}" class="rounded me-2" style="width: 48px; height: 48px; object-fit: cover;">
-        <div>
-          <strong>${displayName}</strong><br>
-          <small class="text-muted">${log.timestamp}</small>
-        </div>
-      </div>
-    `;
-  }).join('');
-}
-
-function fetchRecentDetections() {
-  fetch('/attendance_logs')
-    .then(res => res.json())
-    .then(data => {
-      // Only show detections from live detection
-      const liveDetections = data.filter(log => log.attendance_type === 'live');
-      console.log("Live Data : ", liveDetections)
-      renderRecentDetections(liveDetections.slice(0, 10));
-    })
-    .catch(() => {
-      document.getElementById('recentDetectionsPanel').innerHTML = '<p class="text-danger">Error loading detections</p>';
-    });
-}
-
-// Fetch employee info first, then start polling for detections
-function initRecentDetectionsPanel() {
-  fetchEmployeeInfoMap().then(() => {
-    fetchRecentDetections();
-    setInterval(fetchRecentDetections, 5000);
-  });
-}
-document.addEventListener('DOMContentLoaded', initRecentDetectionsPanel);
-
-// Initialize
-document.addEventListener('DOMContentLoaded', function() {
-  fetchEmployeeImages();
-  fetchAttendanceLogs();
-  startAutoRefresh();
-  
-  // Add event listeners for delete buttons
-  const deleteAllBtn = document.getElementById('deleteAllBtn');
-  deleteAllBtn.addEventListener('click', deleteAllAttendance);
-  
-  // Add event delegation for individual delete buttons
-  document.addEventListener('click', function(e) {
-    if (e.target.closest('.delete-attendance')) {
-      const button = e.target.closest('.delete-attendance');
-      const attendanceId = parseInt(button.getAttribute('data-attendance-id'));
-      // Find the index of the attendance with this ID
-      const index = attendanceLogs.findIndex(log => log.id === attendanceId);
-      if (index !== -1) {
-        deleteAttendance(index);
-      } else {
-        showNotification('Error: Attendance not found', 'danger');
-      }
-    }
-  });
-});
+document.addEventListener('DOMContentLoaded', loadCameraFeeds);
 </script>
-
-<style>
-.attendance-item {
-  transition: all 0.3s ease;
-  border-left: 4px solid #dc3545 !important;
-}
-
-.attendance-item:hover {
-  transform: translateX(5px);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-}
-
-.card-body::-webkit-scrollbar {
-  width: 6px;
-}
-
-.card-body::-webkit-scrollbar-track {
-  background: #f1f1f1;
-}
-
-.card-body::-webkit-scrollbar-thumb {
-  background: #888;
-  border-radius: 3px;
-}
-
-.card-body::-webkit-scrollbar-thumb:hover {
-  background: #555;
-}
-
-/* Camera control button styles */
-#startCamera, #stopCamera {
-  min-width: 140px;
-  transition: all 0.3s ease;
-}
-
-#startCamera:hover:not(:disabled) {
-  transform: scale(1.05);
-  box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
-}
-
-#stopCamera:hover:not(:disabled) {
-  transform: scale(1.05);
-  box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
-}
-
-/* Camera status styles */
-#cameraStatus {
-  border-left: 4px solid #17a2b8;
-}
-
-#cameraStatus.alert-success {
-  border-left-color: #28a745;
-}
-
-#cameraStatus.alert-warning {
-  border-left-color: #ffc107;
-}
-
-#cameraStatus.alert-danger {
-  border-left-color: #dc3545;
-}
-
-/* Video container styles */
-#live-video {
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-}
-
-/* Delete button styles */
-.delete-attendance {
-  transition: all 0.3s ease;
-  opacity: 0.7;
-}
-
-.delete-attendance:hover {
-  opacity: 1;
-  transform: scale(1.1);
-  box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
-}
-
-#deleteAllBtn {
-  transition: all 0.3s ease;
-}
-
-#deleteAllBtn:hover:not(:disabled) {
-  transform: scale(1.05);
-  box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
-}
-
-/* Attendance item hover effect */
-.attendance-item:hover .delete-attendance {
-  opacity: 1;
-}
-</style>
 {% endblock %} 
