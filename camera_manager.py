@@ -6,11 +6,16 @@ from multiprocessing import Process, Queue, Manager
 camera_processes = {}
 camera_queues = {}
 
+# Configurable target FPS
+TARGET_FPS = 30
+FRAME_DURATION = 1.0 / TARGET_FPS
+
 # Camera worker function
 
 def camera_worker(camera_url, frame_queue, camera_id):
     cap = cv2.VideoCapture(camera_url)
     while True:
+        start_time = time.time()
         ret, frame = cap.read()
         if not ret:
             time.sleep(0.1)
@@ -18,8 +23,10 @@ def camera_worker(camera_url, frame_queue, camera_id):
         # (Optional) Add face recognition/model inference here
         if not frame_queue.full():
             frame_queue.put(frame)
-        # Limit FPS to avoid overloading CPU/GPU
-        time.sleep(0.03)  # ~30 FPS
+        # Dynamic sleep to maintain target FPS
+        elapsed = time.time() - start_time
+        sleep_time = max(0, FRAME_DURATION - elapsed)
+        time.sleep(sleep_time)
 
 # Function to start a camera process
 

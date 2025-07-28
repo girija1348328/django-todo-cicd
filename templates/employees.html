@@ -52,8 +52,8 @@
             <textarea class="form-control" id="edit-description" name="description"></textarea>
           </div>
           <div class="mb-3">
-            <label for="edit-image" class="form-label">Image (optional)</label>
-            <input class="form-control" type="file" id="edit-image" name="image" accept="image/*">
+            <label for="edit-images" class="form-label">Add more photos to improve recognition (optional)</label>
+            <input class="form-control" type="file" id="edit-images" name="images" accept="image/*" multiple>
           </div>
         </div>
         <div class="modal-footer">
@@ -151,7 +151,7 @@ function editEmployee(id) {
   document.getElementById('edit-name').value = e.name;
   document.getElementById('edit-employee_id').value = e.employee_id;
   document.getElementById('edit-description').value = e.description || '';
-  document.getElementById('edit-image').value = '';
+  document.getElementById('edit-images').value = '';
   const modal = new bootstrap.Modal(document.getElementById('editModal'));
   modal.show();
 }
