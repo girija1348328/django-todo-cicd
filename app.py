@@ -833,10 +833,10 @@ def test_camera_feed(camera_feed_id):
         if camera is not None:
             camera.release()
 
-if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
-    socketio.run(app, debug=True, use_reloader=False, host='0.0.0.0', port=5000)
+# if __name__ == '__main__':
+#     with app.app_context():
+#         db.create_all()
+#     socketio.run(app, debug=True, use_reloader=False, host='0.0.0.0', port=5000)
 def test_camera_feed(camera_feed_id):
     camera_feed = CameraFeed.query.get_or_404(camera_feed_id)
     camera = None
@@ -955,4 +955,4 @@ def get_employee_status_data():
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    socketio.run(app, debug=True, use_reloader=False)    
+    socketio.run(app, debug=True)     #use_reloader=False
