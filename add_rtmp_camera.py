@@ -13,7 +13,8 @@ def add_rtmp_camera():
     camera_data = {
         'name': 'Test RTMP Stream',
         'camera_type': 'rtsp',  # Using rtsp type for RTMP streams
-        'camera_url': 'rtsp://admin:P@ssw0rd@192.168.1.6:554/cam/realmonitor?channel=1&subtype=0',
+        # 'camera_url': 'rtsp://admin:P@ssw0rd@192.168.1.6:554/cam/realmonitor?channel=1&subtype=0',
+        'camera_url': 'rtmp://13.203.184.235/live/stream/test',
         'location': 'Remote Server',
         'description': 'RTMP stream from remote server for testing'
     }
@@ -61,7 +62,8 @@ def test_camera_connection():
             # Find our RTMP camera
             rtmp_camera = None
             for camera in camera_feeds:
-                if camera['camera_url'] == 'rtsp://admin:P@ssw0rd@192.168.1.6:554/cam/realmonitor?channel=1&subtype=0':
+                # if camera['camera_url'] == 'rtsp://admin:P@ssw0rd@192.168.1.6:554/cam/realmonitor?channel=1&subtype=0':
+                if camera['camera_url'] == 'rtmp://13.203.184.235/live/stream/test':
                     rtmp_camera = camera
                     break
             

@@ -6,7 +6,11 @@ os.environ['TF_ENABLE_ONEDNN_OPTS'] = "0"
 
 from flask import Flask, request, redirect, url_for, flash, jsonify, render_template, current_app
 from flask_sqlalchemy import SQLAlchemy
-import face_recognition
+import logging
+import os
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = "0"
+from flask import Flask, request, redirect, url_for, flash, jsonify, render_template, current_app
+from flask_sqlalchemy import SQLAlchemy
 from werkzeug.utils import secure_filename
 from PIL import Image
 import numpy as np
@@ -16,41 +20,50 @@ from datetime import datetime, timedelta
 from threading import Thread
 import threading
 import queue
-import dlib
 import urllib.parse
-from mtcnn import MTCNN
 from insightface.app import FaceAnalysis
 from flask_migrate import Migrate
 import onnxruntime as ort
-from insightface.model_zoo import ArcFaceONNX
 from collections import deque
 import base64
 from face_tracker import FaceTracker
+import traceback
+import tensorflow as tf
+from threading import Event
+
+# Define threshold parameters for easy configuration
+FACE_DETECTION_CONFIDENCE = 0.95  # Confidence threshold for face detection
+FACE_RECOGNITION_THRESHOLD = 0.6  # Threshold for face recognition matching
+MIN_FACE_SIZE_PX = 60  # Minimum face size in pixels
+MAX_YAW_ANGLE_DEG = 30  # Maximum face rotation angle in degrees
+MIN_RECOGNITION_MARGIN = 0.1  # Minimum difference between top matches
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("face_recognition_system")
 
 print("OpenCV version:", cv2.__version__)
 build_info = cv2.getBuildInformation()
 ffmpeg_support = 'FFMPEG:' in build_info and 'YES' in build_info.split('FFMPEG:')[1].split('\n')[0]
 print("FFMPEG in build info:", ffmpeg_support)
-
-# FFMPEG backend will be used explicitly when opening cameras
 print("FFMPEG backend will be used for RTSP streams")
+print("[DEBUG] ONNX Runtime device:", ort.get_device())
 
-print(ort.get_device())
-
-session = ort.InferenceSession("insightface_repo/model_zoo/model.onnx", providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
-print(session.get_providers())
-
-
-model = ArcFaceONNX("insightface_repo/model_zoo/model.onnx")
-model.prepare(ctx_id=0)
-mtcnn_detector = MTCNN()
-
-# mtcnn = MTCNN(keep_all=True, device='cuda')
-
-if getattr(dlib, 'DLIB_USE_CUDA', False):
-    print("Running on GPU")
-else:
-    print("Running on CPU")
+# Initialize InsightFace FaceAnalysis for detection and recognition
+try:
+    logger.info("Initializing InsightFace FaceAnalysis...")
+    available_providers = ort.get_available_providers()
+    providers = [p for p in ["CUDAExecutionProvider", "CPUExecutionProvider"] if p in available_providers]
+    arcface_app = FaceAnalysis(
+        name='buffalo_l',
+        allowed_modules=['detection', 'recognition'],
+        providers=providers
+    )
+    arcface_app.prepare(ctx_id=0 if "CUDAExecutionProvider" in providers else -1, det_size=(640, 640))
+    logger.info(f"FaceAnalysis initialized with providers: {arcface_app.det_model.session.get_providers()}")
+except Exception as e:
+    logger.error(f"Failed to initialize FaceAnalysis: {e}")
+    arcface_app = None
 
 from app_folder.extensions import db
 from flask_migrate import Migrate
@@ -70,11 +83,11 @@ socketio = SocketIO(app, cors_allowed_origins='*', async_mode='threading')
 
 @socketio.on('connect')
 def handle_connect():
-    print('Client connected')
+    print("[DEBUG] Client connected")
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    print('Client disconnected')
+    print("[DEBUG] Client disconnected")
 
 db.init_app(app)
 migrate = Migrate(app, db)
@@ -115,21 +128,36 @@ if not hasattr(Employee, 'arcface_embedding'):
     Employee.arcface_embedding = db.Column(PickleType, nullable=True)
 
 # Initialize ArcFace model globally
-ctx_id = -1
-arcface_app = FaceAnalysis(name='buffalo_l')
-arcface_app.prepare(ctx_id=ctx_id, det_size=(640, 640))
+ctx_id = -1  # Use CPU first for testing
+    # ...existing code...
 
 def extract_arcface_embedding_from_crop(face_crop):
-    # ArcFace expects RGB
-    if face_crop.shape[2] == 3:
-        rgb_crop = cv2.cvtColor(face_crop, cv2.COLOR_BGR2RGB)
-    else:
-        rgb_crop = face_crop
-    faces = arcface_app.get(rgb_crop)
-    print(f"[DEBUG] ArcFace faces: {faces}")
-    if faces and hasattr(faces[0], 'embedding'):
-        return faces[0].embedding
-    return None
+    """
+    Use InsightFace FaceAnalysis to extract embedding from a face crop.
+    """
+    if arcface_app is None:
+        logger.error("FaceAnalysis not initialized.")
+        return None
+    try:
+        crop = cv2.resize(face_crop, (112, 112))
+        faces = arcface_app.get(crop)
+        if not faces:
+            logger.info("No face detected in crop.")
+            return None
+        embedding = faces[0].embedding
+        if embedding is None or np.isnan(embedding).any() or np.isinf(embedding).any():
+            logger.info("Invalid embedding values.")
+            return None
+        norm = np.linalg.norm(embedding)
+        if norm == 0:
+            logger.info("Zero norm embedding.")
+            return None
+        embedding = embedding / norm
+        logger.info(f"Valid embedding generated, shape: {embedding.shape}")
+        return embedding
+    except Exception as e:
+        logger.error(f"Error extracting embedding: {e}")
+        return None
 
 def align_face_by_keypoints(img, keypoints, output_size=(112, 112)):
     # Standard ArcFace reference points for 112x112
@@ -156,99 +184,31 @@ def align_face_by_keypoints(img, keypoints, output_size=(112, 112)):
     return aligned_face
 
 def extract_arcface_embedding(image_path):
+    """
+    Use InsightFace FaceAnalysis to detect and extract embedding from an image file.
+    """
+    if arcface_app is None:
+        logger.error("FaceAnalysis not initialized.")
+        return None, 'FaceAnalysis not initialized'
     img = cv2.imread(image_path)
     if img is None:
-        print(f"[DEBUG] Could not read image: {image_path}")
+        logger.info(f"Could not read image: {image_path}")
         return None, 'Could not read image'
-
-    print(f"[DEBUG] Image shape: {img.shape}")
-
-    rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    try:
-        detections = mtcnn_detector.detect_faces(rgb_img)
-    except Exception as e:
-        print(f"[ERROR] MTCNN detection failed: {e}")
-        return None, f'MTCNN detection failed: {e}'
-
-    print(f"[DEBUG] MTCNN detections: {detections}")
-    if not detections:
-        debug_path = image_path.replace('.jpg', '_debug.jpg').replace('.jpeg', '_debug.jpeg').replace('.png', '_debug.png')
-        cv2.imwrite(debug_path, img)
-        print(f"[DEBUG] No face detected. Saved debug image to: {debug_path}")
-        return None, f'No face detected. Debug image: {debug_path}'
-
-    det = detections[0]
-    x, y, w, h = det['box']
-    x = max(0, x)
-    y = max(0, y)
-    x2 = min(x + w, img.shape[1])
-    y2 = min(y + h, img.shape[0])
-    face_crop = img[y:y2, x:x2]
-    print(f"[DEBUG] Face crop shape: {face_crop.shape}")
-
-    keypoints = det['keypoints']
-    crop_keypoints = {k: (v[0] - x, v[1] - y) for k, v in keypoints.items()}
-
-    # Try alignment first
-    try:
-        aligned_face = align_face_by_keypoints(face_crop, crop_keypoints, output_size=(112, 112))
-        cv2.imwrite("static/uploads/debug_aligned_face.jpg", aligned_face)
-        print("[DEBUG] Aligned face shape:", aligned_face.shape, "dtype:", aligned_face.dtype)
-        embedding = extract_arcface_embedding_from_crop(aligned_face)
-        if embedding is not None:
-            return embedding, None
-    except Exception as e:
-        print(f"[ERROR] Face alignment failed: {e}")
-
-    # Fallback: crop a square region around the nose and eyes
-    try:
-        nose = crop_keypoints['nose']
-        left_eye = crop_keypoints['left_eye']
-        right_eye = crop_keypoints['right_eye']
-        d_eye = np.linalg.norm(np.array(left_eye) - np.array(right_eye))
-        size = int(max(60, min(face_crop.shape[0], face_crop.shape[1], d_eye * 2)))
-        cx, cy = int(nose[0]), int(nose[1])
-        half = size // 2
-        sx = max(0, cx - half)
-        sy = max(0, cy - half)
-        ex = min(face_crop.shape[1], cx + half)
-        ey = min(face_crop.shape[0], cy + half)
-        square_crop = face_crop[sy:ey, sx:ex]
-        resized_crop = cv2.resize(square_crop, (112, 112))
-        cv2.imwrite("static/uploads/debug_fallback_square_crop.jpg", resized_crop)
-        print("[DEBUG] Fallback square crop shape:", resized_crop.shape, "dtype:", resized_crop.dtype)
-        embedding = extract_arcface_embedding_from_crop(resized_crop)
-        if embedding is not None:
-            return embedding, None
-    except Exception as e:
-        print(f"[ERROR] Fallback square crop failed: {e}")
-
-    # Final fallback: resize entire crop
-    try:
-        resized_crop = cv2.resize(face_crop, (112, 112))
-        cv2.imwrite("static/uploads/debug_final_fallback_crop.jpg", resized_crop)
-        print("[DEBUG] Final fallback crop shape:", resized_crop.shape, "dtype:", resized_crop.dtype)
-        embedding = extract_arcface_embedding_from_crop(resized_crop)
-        if embedding is not None:
-            return embedding, None
-    except Exception as e:
-        print(f"[ERROR] Final fallback resize failed: {e}")
-
-    # --- NEW PATCH: Try the full image as a last resort ---
-    try:
-        resized_full = cv2.resize(img, (112, 112))
-        cv2.imwrite("static/uploads/debug_full_image_crop.jpg", resized_full)
-        print("[DEBUG] Full image fallback crop shape:", resized_full.shape, "dtype:", resized_full.dtype)
-        embedding = extract_arcface_embedding_from_crop(resized_full)
-        if embedding is not None:
-            return embedding, None
-    except Exception as e:
-        print(f"[ERROR] Full image fallback failed: {e}")
-    # Save crop for debugging
-    debug_path = image_path.replace('.jpg', '_arcfacefail.jpg').replace('.jpeg', '_arcfacefail.jpeg').replace('.png', '_arcfacefail.png')
-    cv2.imwrite(debug_path, face_crop)
-    print(f"[DEBUG] ArcFace failed. Saved crop to: {debug_path}")
-    return None, f'ArcFace failed. Debug crop: {debug_path}'
+    faces = arcface_app.get(img)
+    if not faces:
+        logger.info(f"No face detected in image: {image_path}")
+        return None, 'No face detected'
+    embedding = faces[0].embedding
+    if embedding is None or np.isnan(embedding).any() or np.isinf(embedding).any():
+        logger.info("Invalid embedding values.")
+        return None, 'Invalid embedding values'
+    norm = np.linalg.norm(embedding)
+    if norm == 0:
+        logger.info("Zero norm embedding.")
+        return None, 'Zero norm embedding'
+    embedding = embedding / norm
+    logger.info(f"Valid embedding generated, shape: {embedding.shape}")
+    return embedding, None
 
 @app.route('/')
 def home():
@@ -261,7 +221,7 @@ def add_employee():
     description = request.form.get('description')
     files = request.files.getlist('images')
     if not name or not employee_id or not files:
-        return jsonify({'status': 'error', 'message': 'Missing or invalid data'}), 400
+        return jsonify({'status': 'error', 'message': 'Missing required fields'}), 400
 
     embeddings = []
     image_filenames = []
@@ -379,7 +339,7 @@ def cosine_similarity(a, b):
 # Add this helper function near the top of the file (after cosine_similarity or in a utils section)
 def recognize_employee(embedding, known_embeddings, known_names, threshold=0.5, top_n=3, min_margin=0.07):
     print(f"[DEBUG] Recognizing employee with embedding: {embedding}, known_embeddings: {len(known_embeddings)}, known_names: {len(known_names)}")
-    """
+    """.
     Recognize an employee using top-N voting and improved thresholding.
     Returns (name, confidence, debug_info)
     """
@@ -409,12 +369,16 @@ camera_locks = {}
 stop_flags = {}
 face_trackers = {}  # Dictionary to hold a tracker for each camera
 
-# Add these constants near the top of the file (after imports)
-DETECTION_CONFIDENCE_THRESHOLD = 0.60  # Only accept faces with high confidence
-MIN_FACE_SIZE = 40  # Minimum width/height in pixels
-MIN_ASPECT_RATIO = 0.7  # Acceptable aspect ratio range for faces
-MAX_ASPECT_RATIO = 1.3
-MIN_BLURRINESS = 30  # Optional: minimum variance of Laplacian for sharpness
+# Detection and recognition configuration
+DETECTION_CONFIDENCE_THRESHOLD = 0.85  # Increased threshold for higher confidence
+MIN_FACE_SIZE = 60  # Increased minimum face size for better quality
+MIN_ASPECT_RATIO = 0.8  # Tightened aspect ratio range
+MAX_ASPECT_RATIO = 1.2
+MIN_BLURRINESS = 50  # Increased minimum sharpness
+RECOGNITION_THRESHOLD = 0.6  # Minimum similarity score for recognition
+MIN_RECOGNITION_MARGIN = 0.1  # Minimum difference between top 2 matches
+MAX_YAW_ANGLE = 30  # Maximum face rotation angle in degrees
+MAX_DETECTION_FAILURES = 3  # Maximum consecutive detection failures before resetting
 
 # Update gen_frames to use MTCNN for detection and ArcFace for recognition only
 def gen_frames(video_filename=None, camera_feed_id=None):
@@ -552,48 +516,19 @@ def gen_frames(video_filename=None, camera_feed_id=None):
                             scale = 0.5
                             small_frame = cv2.resize(frame, (0, 0), fx=scale, fy=scale)
                             rgb_small_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
-                            detections = mtcnn_detector.detect_faces(rgb_small_frame)
-                            # print(f"[DEBUG] MTCNN detections: {detections}")
-                            height, width = frame.shape[:2]
+                            faces = arcface_app.get(frame)
                             boxes = []
                             names = []
                             confidences = []
-                            for det in detections:
-                                confidence = det.get('confidence', 1.0)  # MTCNN returns this
-                                if confidence < DETECTION_CONFIDENCE_THRESHOLD:
-                                    print(f"[DEBUG] Detection skipped: low confidence {confidence:.2f}")
-                                    continue
-                                x, y, w, h = det['box']
-                                x = int(x / scale)
-                                y = int(y / scale)
-                                w = int(w / scale)
-                                h = int(h / scale)
-                                x = max(0, x)
-                                y = max(0, y)
-                                x2 = min(x + w, width)
-                                y2 = min(y + h, height)
-                                if w < MIN_FACE_SIZE or h < MIN_FACE_SIZE:
-                                    print(f"[DEBUG] Detection skipped: small face {w}x{h}")
-                                    continue
-                                aspect_ratio = w / h
-                                if aspect_ratio < MIN_ASPECT_RATIO or aspect_ratio > MAX_ASPECT_RATIO:
-                                    print(f"[DEBUG] Detection skipped: aspect ratio {aspect_ratio:.2f}")
-                                    continue
-                                face_crop = frame[y:y2, x:x2]
-                                # Optional: blurriness check
-                                if cv2.Laplacian(face_crop, cv2.CV_64F).var() < MIN_BLURRINESS:
-                                    print(f"[DEBUG] Detection skipped: blurry face")
-                                    continue
-                                embedding = extract_arcface_embedding_from_crop(face_crop)
+                            for face in faces:
+                                x1, y1, x2, y2 = [int(v) for v in face.bbox]
+                                embedding = face.embedding
                                 name = "Unknown"
                                 confidence = 0.0
                                 if embedding is not None:
                                     name, confidence, debug_info = recognize_employee(
                                         embedding, known_arcface_embeddings, known_names, threshold=0.5, top_n=3, min_margin=0.07)
-                                    print(f"[DEBUG] Recognition result: {name}, confidence: {confidence:.3f}, info: {debug_info}")
-                                else:
-                                    print(f"[DEBUG] No embedding extracted for detected face.")
-                                boxes.append((x, y, x2, y2))
+                                boxes.append((x1, y1, x2, y2))
                                 names.append(name)
                                 confidences.append(confidence)
                             last_boxes = boxes
@@ -872,6 +807,43 @@ def test_camera_feed(camera_feed_id):
         if camera_feed.camera_type == 'device':
             try:
                 cam_index = int(camera_feed.camera_url)
+                camera = cv2.VideoCapture(cam_index)
+                if not camera.isOpened():
+                    return jsonify({'status': 'error', 'message': f'Camera device index {cam_index} not available'}), 400
+            except ValueError:
+                camera = find_available_camera()
+                if camera is None:
+                    return jsonify({'status': 'error', 'message': 'No camera devices available'}), 400
+        else:
+            rtsp_url = encode_rtsp_url(camera_feed.camera_url)
+            camera = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+
+        if not camera.isOpened():
+            return jsonify({'status': 'error', 'message': 'Cannot connect to camera feed'}), 400
+
+        ret, frame = camera.read()
+        if ret and frame is not None:
+            return jsonify({'status': 'success', 'message': 'Camera feed is working'})
+        else:
+            return jsonify({'status': 'error', 'message': 'Camera feed is not working - no video signal'}), 400
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Error testing camera: {str(e)}'}), 500
+    finally:
+        if camera is not None:
+            camera.release()
+
+if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
+    socketio.run(app, debug=True, use_reloader=False, host='0.0.0.0', port=5000)
+def test_camera_feed(camera_feed_id):
+    camera_feed = CameraFeed.query.get_or_404(camera_feed_id)
+    camera = None
+    try:
+        if camera_feed.camera_type == 'device':
+            try:
+                cam_index = int(camera_feed.camera_url)
                 # Check if the device index is available
                 test_cam = cv2.VideoCapture(cam_index)
                 if not test_cam.isOpened():
@@ -978,9 +950,9 @@ def get_employee_status_data():
             }
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500     
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    socketio.run(app, debug=True, use_reloader=False)      
+    socketio.run(app, debug=True, use_reloader=False)    
