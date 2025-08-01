@@ -1,7 +1,7 @@
 """
 CameraFeed model for the Criminal Face Detection system.
 """
-from ..extensions import db
+from app_folder.extensions import db
 from datetime import datetime
 
 class CameraFeed(db.Model):

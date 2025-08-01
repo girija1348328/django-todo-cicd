@@ -1,7 +1,7 @@
 """
 Blueprint registration for Flask app.
 """
-from .employees import employees_bp
+# from .employees import employees_bp
 from .cameras import cameras_bp
 from .attendance import attendance_bp
 

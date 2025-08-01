@@ -1,7 +1,10 @@
 # syntax=docker/dockerfile:1
 
-ARG PYTHON_VERSION=3.10
-FROM python:${PYTHON_VERSION}-slim as base
+FROM python:3.10-slim
+RUN pip install requests
+
+# ARG PYTHON_VERSION=3.10
+# FROM python:${PYTHON_VERSION}-slim as base
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -35,7 +38,10 @@ RUN adduser \
 COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
     python -m pip install --upgrade pip && \
-    python -m pip install -r requirements.txt
+    python -m pip install \
+        --retries 10 \
+        --timeout 600 \
+        -r requirements.txt
 
 # Copy the rest of your application
 COPY . .
@@ -43,7 +49,7 @@ COPY . .
 # Use the non-root user
 USER appuser
 
-EXPOSE 8000
+EXPOSE 5000
 
 # Run the app using python directly instead of gunicorn
 CMD ["python", "app.py"]
