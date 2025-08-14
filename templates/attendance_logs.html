@@ -3,7 +3,6 @@
 <div class="container-fluid">
   <h2 class="mb-4">📊 Attendance & Detection Logs</h2>
   
-  <!-- Search and Actions Bar -->
   <div class="row mb-3">
     <div class="col-md-8">
       <div class="input-group">
@@ -25,7 +24,6 @@
     </div>
   </div>
 
-  <!-- Main Table -->
   <div class="table-responsive">
     <table class="table table-striped table-hover" id="logs-table">
       <thead class="table-dark">
@@ -42,12 +40,10 @@
         </tr>
       </thead>
       <tbody id="logs-tbody">
-        <!-- Combined data will be loaded here -->
       </tbody>
     </table>
   </div>
 
-  <!-- Pagination -->
   <nav>
     <ul class="pagination justify-content-center" id="pagination">
     </ul>
@@ -55,17 +51,14 @@
 </div>
 
 <script>
-// Combined data management
 let allData = [];
 let filteredData = [];
 let currentPage = 1;
 const pageSize = 15;
 
-// Load all data (attendance logs + detection history)
 function loadAllData() {
   fetch('/api/detection_history').then(res => { if (!res.ok) throw new Error('detection_fetch_failed'); return res.json(); })
   .then((detectionData) => {
-    // Support both array and {detections: [...]} shapes
     const detectionArray = Array.isArray(detectionData) ? detectionData : (detectionData.detections || []);
     const detectionFormatted = detectionArray.map(detection => ({
       id: `det_${detection.id}`,
@@ -108,7 +101,6 @@ function renderTable() {
   pageData.forEach(record => {
     const row = document.createElement('tr');
     
-    // Determine status styling
     let statusClass = 'secondary';
     let statusIcon = '';
     
@@ -151,7 +143,6 @@ function renderPagination() {
   const pageCount = Math.ceil(filteredData.length / pageSize);
   if (pageCount <= 1) return;
   
-  // Previous button
   const prevLi = document.createElement('li');
   prevLi.className = `page-item ${currentPage === 1 ? 'disabled' : ''}`;
   prevLi.innerHTML = '<a class="page-link" href="#"><i class="fas fa-chevron-left"></i></a>';
@@ -164,7 +155,6 @@ function renderPagination() {
   };
   pagination.appendChild(prevLi);
   
-  // Page numbers
   for (let i = 1; i <= pageCount; i++) {
     const li = document.createElement('li');
     li.className = `page-item ${i === currentPage ? 'active' : ''}`;
@@ -178,7 +168,6 @@ function renderPagination() {
     pagination.appendChild(li);
   }
   
-  // Next button
   const nextLi = document.createElement('li');
   nextLi.className = `page-item ${currentPage === pageCount ? 'disabled' : ''}`;
   nextLi.innerHTML = '<a class="page-link" href="#"><i class="fas fa-chevron-right"></i></a>';
@@ -230,13 +219,12 @@ function deleteRecord(recordId) {
   if (!confirm('Are you sure you want to delete this record?')) return;
   
   if (recordId.startsWith('det_')) {
-    // Delete detection history record
     const detectionId = recordId.replace('det_', '');
     fetch(`/api/detection_history/${detectionId}`, { method: 'DELETE' })
       .then(res => res.json())
       .then(data => {
         if (data.success) {
-          loadAllData(); // Reload all data
+          loadAllData();
           alert('Record deleted successfully!');
         } else {
           alert('Error deleting record: ' + data.message);
@@ -246,13 +234,12 @@ function deleteRecord(recordId) {
         alert('Error deleting record: ' + error);
       });
   } else {
-    // Delete attendance log record
     const attendanceId = recordId.replace('att_', '');
     fetch(`/delete_attendance_log/${attendanceId}`, { method: 'DELETE' })
       .then(res => res.json())
       .then(data => {
         if (data.status === 'success') {
-          loadAllData(); // Reload all data
+          loadAllData();
           alert('Record deleted successfully!');
         } else {
           alert('Error deleting record: ' + data.message);
@@ -267,12 +254,10 @@ function deleteRecord(recordId) {
 function deleteAllRecords() {
   if (!confirm('⚠️ This will delete ALL records (both attendance logs and detection history). This action cannot be undone!')) return;
   
-  // Delete all detection history first
   fetch('/api/detection_history/clear?confirm=true', { method: 'POST' })
     .then(res => res.json())
     .then(data => {
       if (data.success) {
-        // Then delete all attendance logs
         return fetch('/delete_all_attendance_logs', { method: 'DELETE' });
       } else {
         throw new Error('Failed to clear detection history');
@@ -295,13 +280,11 @@ function deleteAllRecords() {
     });
 }
 
-// Event listeners
 document.getElementById('searchInput').addEventListener('input', filterData);
 document.getElementById('searchBtn').addEventListener('click', filterData);
 document.getElementById('refreshBtn').addEventListener('click', loadAllData);
 document.getElementById('deleteAllBtn').addEventListener('click', deleteAllRecords);
 
-// Initialize when page loads
 document.addEventListener('DOMContentLoaded', function() {
   loadAllData();
 });

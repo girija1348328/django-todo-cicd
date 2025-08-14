@@ -1,6 +1,5 @@
 import os
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = "0"
-# Improve RTSP/FFmpeg capture stability and reduce decode noise
 os.environ.setdefault(
     'OPENCV_FFMPEG_CAPTURE_OPTIONS',
     'rtsp_transport;tcp|rtsp_flags;prefer_tcp|probesize;262144|analyzeduration;1000000|max_delay;5000000|buffer_size;1048576|loglevel;error'
@@ -312,7 +311,6 @@ def handle_test_detection_event():
         'image_url': url_for('static', filename='img/default-avatar.png', _external=True)
     }
     print("[TEST_DETECTION] Emitting test detection_event with data:", test_detection)
-    # Emit to the triggering client explicitly, and also broadcast globally
     socketio.emit('detection_event', test_detection, room=sid)
     socketio.emit('detection_event', test_detection)
     print("[TEST_DETECTION] Test detection_event emitted successfully to client and broadcast")
@@ -519,12 +517,9 @@ def emit_websocket_frame(camera_id, camera_name, frame, detections=None, employe
     """
     global websocket_streaming_active, websocket_stream_settings, stream_viewers
     
-    # Always allow global emit; per-viewer emits happen if viewers exist
         
     try:
-        # Handle legacy detections parameter
         if detections is not None and isinstance(detections, dict):
-            # If detections is provided, use it to populate the fields
             if hasattr(emit_websocket_frame, 'access_override'):
                 access = emit_websocket_frame.access_override
                 del emit_websocket_frame.access_override
@@ -538,19 +533,16 @@ def emit_websocket_frame(camera_id, camera_name, frame, detections=None, employe
             location = detections.get('location', location or camera_name)
             timestamp = detections.get('timestamp', timestamp)
         
-        # Set default values if not provided
         now_str = datetime.utcnow().strftime('%H:%M:%S')
         timestamp = timestamp or now_str
         location = location or camera_name
         
-        # If name not provided, treat as unknown without forcing fake details
         if employee_name is None or employee_name == '':
             employee_name = 'Unknown Visitor'
             access = False
             designation = ''
             department = ''
         
-        # Lookup employee image from the database (ensure app context for url_for)
         from app_folder.models.employee import Employee
         from flask import url_for
         image_url = None
@@ -562,13 +554,11 @@ def emit_websocket_frame(camera_id, camera_name, frame, detections=None, employe
                     if employee and employee.images:
                         image_url = url_for('static', filename=f'uploads/{employee.images[0].image_filename}', _external=True)
         except Exception:
-            # Fallback if context/url_for fails
             image_url = image_url or ''
 
-        # Construct the detection event
         detection = {
             'employee_name': employee_name,
-            'confidence': round(float(confidence), 2),  # Ensure float and round to 2 decimal places
+            'confidence': round(float(confidence), 2),
             'designation': designation,
             'department': department,
             'location': location,
@@ -579,17 +569,14 @@ def emit_websocket_frame(camera_id, camera_name, frame, detections=None, employe
             'image_url': image_url
         }
         
-        # Log the detection event
         print("[SOCKETIO] Emitting detection_event with fields:")
         logger.info("[SOCKETIO] Emitting detection_event with fields:")
         for k, v in detection.items():
             print(f"    {k}: {v}")
             logger.info(f"    {k}: {v}")
             
-        # Emit the event (Flask-SocketIO for app UIs)
         try:
             socketio.emit('detection_event', detection)
-            # Also emit to each active stream viewer room to ensure delivery to new/late subscribers
             try:
                 for viewer_sid in list(stream_viewers):
                     socketio.emit('detection_event', detection, room=viewer_sid)
@@ -610,7 +597,6 @@ def emit_websocket_frame(camera_id, camera_name, frame, detections=None, employe
             print(f"[ERROR] Exception during socketio.emit: {emit_exc}")
             logger.error(f"Exception during socketio.emit: {emit_exc}")
         
-        # Also enqueue for the test WebSocket server (8769) used by client.html
         try:
             detection_broadcast_queue.put_nowait(detection)
         except Exception:
@@ -634,14 +620,12 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# Register blueprints
 app.register_blueprint(detection_history_bp)
 
 def encode_rtsp_url(rtsp_url):
     if 'rtsp://' in rtsp_url:
         try:
             prefix, rest = rtsp_url.split('://', 1)
-            # Split at the last '@' to support '@' inside password
             if '@' in rest:
                 creds, path = rest.rsplit('@', 1)
                 if ':' in creds:
@@ -1017,7 +1001,6 @@ def gen_frames(video_filename=None, camera_feed_id=None):
                         rtsp_url += f"{sep}rtsp_transport=tcp"
                     print(f"[DEBUG] Attempting to open RTSP stream: {rtsp_url}")
                     camera = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
-                    # Give the RTSP session a brief time to handshake and start
                     time.sleep(0.5)
                     retry_count = 0
                     max_retries = 5
@@ -1060,7 +1043,7 @@ def gen_frames(video_filename=None, camera_feed_id=None):
                 frame_count = 0
                 start_time = time.time()
                 fps = 0.0
-                process_every_n = 5  # Increased for smoother output
+                process_every_n = 5
                 last_boxes = []
                 last_names = []
                 last_confidences = []
@@ -1084,7 +1067,6 @@ def gen_frames(video_filename=None, camera_feed_id=None):
                         frame_count += 1
                         process_this_frame = (frame_count % process_every_n == 0)
                         if process_this_frame:
-                            # Resize for faster detection
                             scale = 0.5
                             small_frame = cv2.resize(frame, (0, 0), fx=scale, fy=scale)
                             rgb_small_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
@@ -1106,7 +1088,6 @@ def gen_frames(video_filename=None, camera_feed_id=None):
                             last_boxes = boxes
                             last_names = names
                             last_confidences = confidences
-                            # Emit detection events aligned with box updates
                             try:
                                 camera_name = camera_feed.name if camera_feed_id and 'camera_feed' in locals() and camera_feed else "Live Camera"
                             except Exception:
@@ -1117,7 +1098,7 @@ def gen_frames(video_filename=None, camera_feed_id=None):
                                 key = name if name != "Unknown" else "Unknown"
                                 last_ts = last_emit_times.get(key, 0)
                                 if now_ts - last_ts < 1.0:
-                                    continue  # simple cooldown per identity
+                                    continue
                                 timestamp = datetime.utcnow().strftime('%H:%M:%S')
                                 try:
                                     if name != "Unknown" and confidence > 0.6:
@@ -1158,13 +1139,11 @@ def gen_frames(video_filename=None, camera_feed_id=None):
                                     last_emit_times[key] = now_ts
                                 except Exception as emit_err:
                                     print(f"[EMIT ERROR] Could not emit detection event: {emit_err}")
-                        # Draw boxes and labels
                         for (x1, y1, x2, y2), name, confidence in zip(last_boxes, last_names, last_confidences):
                             color = (255, 0, 0) if name != "Unknown" else (0, 255, 255)
                             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
                             label = f"{name} ({confidence:.2f})" if name != "Unknown" else name
                             cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
-                        # FPS calculation
                         elapsed_time = time.time() - start_time
                         if elapsed_time > 0:
                             fps = frame_count / elapsed_time
@@ -1281,7 +1260,6 @@ async def ws_video_stream(websocket, path=None):
     frame_generator = gen_frames(camera_feed_id=DEFAULT_CAMERA_FEED_ID)
     try:
         for frame_bytes in frame_generator:
-            # Send current video frame
             jpg_data = extract_jpeg_bytes(frame_bytes)
             if jpg_data:
                 try:
@@ -1291,7 +1269,6 @@ async def ws_video_stream(websocket, path=None):
                 except Exception:
                     pass
 
-            # Broadcast any pending employee details to all connected clients
             try:
                 while True:
                     detection = detection_broadcast_queue.get_nowait()
@@ -1339,7 +1316,6 @@ def start_ws_server():
     t = threading.Thread(target=run_ws, daemon=True)
     t.start()
 
-# Detection broadcast queue used by the unified WS server
 detection_broadcast_queue = queue.Queue()
 
 @app.route('/live_detection')
@@ -1362,12 +1338,6 @@ def add_employee_form():
 @app.route('/employees_page', methods=['GET'])
 def employees_page():
     return render_template('employees.html')
-
-
-
-
-
-
 
 @app.route('/attendance_logs_page', methods=['GET'])
 def attendance_logs_page():
@@ -1812,12 +1782,10 @@ def settings_page():
 def stream_viewer():
     return render_template('stream_viewer.html')
 
-# Debug: expose the absolute SQLite DB path being used by this process
 @app.route('/api/_debug_db_path')
 def debug_db_path():
     try:
         uri = app.config.get('SQLALCHEMY_DATABASE_URI')
-        # Resolve common sqlite relative form like sqlite:///database.db
         db_file = None
         if uri and uri.startswith('sqlite:///'):
             relative = uri.replace('sqlite:///','',1)
@@ -1840,7 +1808,5 @@ def client_page_html():
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    # Start a single unified WebSocket server on 8765 (no Flask reloader duplication)
     start_ws_server()
-    # Run without Flask reloader to avoid double-binding background threads
     socketio.run(app, host='0.0.0.0', port=5000, debug=False, use_reloader=False)

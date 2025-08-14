@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Simple script to manage detection history retention settings.
 Easy to use for setting retention periods and cleaning up old data.

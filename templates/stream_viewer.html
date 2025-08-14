@@ -16,7 +16,6 @@
             overflow: hidden;
         }
 
-        /* App layout: 78% left (video), 22% right (alerts/history) */
         .app-layout {
             display: flex;
             flex-direction: row;
@@ -174,7 +173,6 @@
             pointer-events: none;
         }
 
-        /* Live alerts overlay (bottom-right of left pane) */
         .detection-card-container {
             position: absolute;
             right: 20px;
@@ -189,10 +187,9 @@
         }
         .detection-card-container > * { pointer-events: auto; }
 
-        /* History list */
         .detection-history {
             display: flex;
-            flex-direction: column-reverse; /* newest on top when appending at end */
+            flex-direction: column-reverse;
             gap: 8px;
         }
         .history-item {
@@ -423,7 +420,6 @@
                     <span id="videoStatus" class="badge bg-danger">No Stream</span>
                 </div>
             </div>
-            <!-- Live detection cards overlay -->
             <div class="detection-card-container" id="detection-card-container"></div>
         </div>
 
@@ -460,7 +456,6 @@
         </div>
     </div>
 
-    <!-- moved to right sidebar -->
 
     <style>
         .green-border { border: 8px solid green !important; }
@@ -493,7 +488,6 @@
 
         let cardCounter = 0;
         let activeCards = new Map();
-        // Throttle: show a new card only if >=4s since last popup; each card lasts 5s
         const DETECTION_MIN_INTERVAL_MS = 4000;
         const CARD_VISIBLE_MS = 5000;
         let lastPopupTime = 0;
@@ -660,7 +654,6 @@
             const cardId = createDetectionCard(cardType, data);
             addHistoryEntry(cardType, data);
             
-            // Store detection in database
             storeDetectionInDatabase(data, isGranted);
             
             console.log(`[MultiCard] ${cardType.toUpperCase()} card created with ID: ${cardId}`);
@@ -705,12 +698,10 @@
         }
 
         function clearHistory() {
-            // Clear local history display
             const historyEl = document.getElementById('detection-history');
             if (historyEl) historyEl.innerHTML = '';
             detectionHistory.length = 0;
             
-            // Clear database history (with confirmation)
             if (confirm('Are you sure you want to clear all detection history from the database? This action cannot be undone.')) {
                 fetch('/api/detection_history/clear?confirm=true', {
                     method: 'POST'
@@ -771,13 +762,11 @@
             .then(response => response.json())
             .then(result => {
                 if (result.success) {
-                    // Clear existing history display
                     const historyEl = document.getElementById('detection-history');
                     if (historyEl) {
                         historyEl.innerHTML = '';
                     }
                     
-                    // Add each detection to history display
                     result.detections.forEach(detection => {
                         const item = {
                             type: detection.access_granted ? 'granted' : 'denied',
@@ -801,7 +790,6 @@
             });
         }
 
-        // live panel removed; history is always visible in the right pane
 
         function tryDisplayDetection(data) {
             const now = Date.now();
@@ -809,7 +797,6 @@
                 handleDetectionEvent(data);
                 lastPopupTime = now;
             } else {
-                // Throttled; ignore this detection
             }
         }
 
@@ -911,8 +898,6 @@
 
             startWebSocketFallback();
 
-            // History is the only sidebar view
-            // Load detection history from database
             loadDetectionHistory();
 
             const videoStatus = document.getElementById('videoStatus');

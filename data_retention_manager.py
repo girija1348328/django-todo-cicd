@@ -14,12 +14,12 @@ class DataRetentionManager:
         self.db_path = db_path
         self.config_file = config_file
         self.default_config = {
-            "retention_days": 90,  # Keep records for 90 days by default
-            "auto_cleanup": False,  # Disable automatic cleanup (manual control)
-            "cleanup_frequency_hours": 24,  # Run cleanup every 24 hours
-            "max_records": 10000,   # Maximum records to keep
-            "backup_before_cleanup": True,  # Backup before deleting
-            "notify_on_cleanup": True       # Show cleanup results
+            "retention_days": 90,
+            "auto_cleanup": False,
+            "cleanup_frequency_hours": 24,
+            "max_records": 10000,
+            "backup_before_cleanup": True,
+            "notify_on_cleanup": True
         }
         self.load_config()
     
@@ -56,11 +56,9 @@ class DataRetentionManager:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Get total records
             cursor.execute("SELECT COUNT(*) FROM detection_history")
             total_records = cursor.fetchone()[0]
             
-            # Get oldest and newest records
             cursor.execute("""
                 SELECT MIN(timestamp), MAX(timestamp) 
                 FROM detection_history 
@@ -70,7 +68,6 @@ class DataRetentionManager:
             oldest_time = time_range[0] if time_range[0] else None
             newest_time = time_range[1] if time_range[1] else None
             
-            # Calculate age of oldest record
             oldest_age_days = None
             if oldest_time:
                 try:
@@ -79,7 +76,6 @@ class DataRetentionManager:
                 except:
                     pass
             
-            # Get records that would be deleted
             cutoff_date = datetime.now() - timedelta(days=self.config['retention_days'])
             cursor.execute("""
                 SELECT COUNT(*) FROM detection_history 
@@ -114,11 +110,9 @@ class DataRetentionManager:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Calculate cutoff date
             cutoff_date = datetime.now() - timedelta(days=self.config['retention_days'])
             cutoff_str = cutoff_date.isoformat()
             
-            # Get records to delete
             cursor.execute("""
                 SELECT id, timestamp, employee_name, access_granted 
                 FROM detection_history 
@@ -142,7 +136,7 @@ class DataRetentionManager:
                 print(f"{'ID':<4} {'Date':<20} {'Name':<20} {'Status':<8}")
                 print("-" * 80)
                 
-                for record in records_to_delete[:10]:  # Show first 10
+                for record in records_to_delete[:10]:
                     status = "✅ GRANTED" if record[3] else "❌ DENIED"
                     date_str = record[1][:19] if record[1] else "N/A"
                     print(f"{record[0]:<4} {date_str:<20} {record[2]:<20} {status:<8}")
@@ -154,7 +148,6 @@ class DataRetentionManager:
                 conn.close()
                 return True
             
-            # Actually delete the records
             print(f"\n🗑️ Deleting {len(records_to_delete)} old records...")
             
             cursor.execute("""
@@ -167,7 +160,6 @@ class DataRetentionManager:
             
             print(f"✅ Successfully deleted {deleted_count} old records")
             
-            # Get new total
             cursor.execute("SELECT COUNT(*) FROM detection_history")
             new_total = cursor.fetchone()[0]
             print(f"📊 Database now contains {new_total} records")
@@ -193,7 +185,6 @@ class DataRetentionManager:
         
         print(f"✅ Retention period changed from {old_days} days to {days} days")
         
-        # Show what this means
         cutoff_date = datetime.now() - timedelta(days=days)
         print(f"   Records older than {cutoff_date.strftime('%Y-%m-%d')} will be cleaned up")
         
@@ -240,7 +231,6 @@ class DataRetentionManager:
         else:
             print("Records to Delete: 0 (all records within retention period)")
         
-        # Show retention timeline
         if info['oldest_age_days']:
             print(f"\n📅 Retention Timeline:")
             print(f"   Current: {datetime.now().strftime('%Y-%m-%d')}")
@@ -260,7 +250,6 @@ def main():
     
     manager = DataRetentionManager()
     
-    # Show current status
     manager.show_status()
     
     print(f"\n💡 Available Commands:")
@@ -270,11 +259,9 @@ def main():
     print("4. manager.cleanup_old_records(False) # Actually delete old records")
     print("5. manager.show_status()              # Show current status")
     
-    # Example: Set to 30 days retention
     print(f"\n🧪 Example: Setting retention to 30 days...")
     manager.set_retention_days(30)
     
-    # Show what would be cleaned up
     print(f"\n🧪 Example: Checking what would be cleaned up...")
     manager.cleanup_old_records(dry_run=True)
 

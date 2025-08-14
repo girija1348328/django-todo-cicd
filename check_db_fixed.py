@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Fixed database checker that shows all existing tables and their contents.
 This will help us understand your actual database structure.
@@ -20,7 +19,6 @@ def check_database():
         
         print(f"✅ Database found at: {os.path.abspath(db_path)}")
         
-        # Get all tables
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
         tables = cursor.fetchall()
         
@@ -33,19 +31,16 @@ def check_database():
         for table in tables:
             print(f"  - {table[0]}")
         
-        # Check each table for content
         for table_name in [table[0] for table in tables]:
             print(f"\n🔍 Table: {table_name}")
             print("-" * 40)
             
             try:
-                # Get row count
                 cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
                 count = cursor.fetchone()[0]
                 print(f"  Records: {count}")
                 
                 if count > 0:
-                    # Get table structure
                     cursor.execute(f"PRAGMA table_info({table_name})")
                     columns = cursor.fetchall()
                     
@@ -56,7 +51,6 @@ def check_database():
                         nullable = "NOT NULL" if col[3] else "NULL"
                         print(f"    - {col_name}: {col_type} ({nullable})")
                     
-                    # Show sample data (first 3 rows)
                     cursor.execute(f"SELECT * FROM {table_name} LIMIT 3")
                     sample_rows = cursor.fetchall()
                     
@@ -68,7 +62,6 @@ def check_database():
             except Exception as e:
                 print(f"  ❌ Error reading table: {e}")
         
-        # Check for detection_history table specifically
         print(f"\n🎯 Detection History Status:")
         print("-" * 40)
         
