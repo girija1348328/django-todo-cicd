@@ -26,7 +26,6 @@
                         </tr>
                     </thead>
                     <tbody>
-                        <!-- Camera feeds will be loaded here -->
                     </tbody>
                 </table>
             </div>
@@ -34,7 +33,6 @@
     </div>
 </div>
 
-<!-- Edit Camera Modal -->
 <div class="modal fade" id="editCameraModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
@@ -163,7 +161,6 @@ function testCamera(cameraId) {
 }
 
 function startDetection(cameraId) {
-    // Open live detection page in the same window, with auto-select and auto-start
     window.location.href = `/live_detection_page?camera_feed_id=${cameraId}&auto_start=1`;
 }
 
@@ -228,7 +225,6 @@ function deleteCamera(cameraId) {
     }
 }
 
-// Load camera feeds when page loads
 document.addEventListener('DOMContentLoaded', loadCameraFeeds);
 </script>
 {% endblock %} 

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Script to add RTMP camera feed to the employee attendance system
 """
@@ -9,18 +8,18 @@ import sys
 def add_rtmp_camera():
     """Add the RTMP camera feed to the system"""
     
-    # Camera feed details
     camera_data = {
         'name': 'Test RTMP Stream',
-        'camera_type': 'rtsp',  # Using rtsp type for RTMP streams
-        # 'camera_url': 'rtsp://admin:P@ssw0rd@192.168.1.6:554/cam/realmonitor?channel=1&subtype=0',
+        'camera_type': 'rtsp',
+        'camera_url': 'rtsp://admin:P@ssw0rd@192.168.1.6:554/cam/realmonitor?channel=1&subtype=0',
+        '''
         'camera_url': 'rtmp://13.203.184.235/live/stream/test',
+        '''
         'location': 'Remote Server',
         'description': 'RTMP stream from remote server for testing'
     }
     
     try:
-        # Make the API call to add camera feed
         response = requests.post('http://localhost:5000/add_camera_feed', data=camera_data)
         
         if response.status_code == 200:
@@ -55,14 +54,11 @@ def add_rtmp_camera():
 def test_camera_connection():
     """Test if the camera feed is working"""
     try:
-        # First, get the camera feeds to find the ID
         response = requests.get('http://localhost:5000/camera_feeds')
         if response.status_code == 200:
             camera_feeds = response.json()
-            # Find our RTMP camera
             rtmp_camera = None
             for camera in camera_feeds:
-                # if camera['camera_url'] == 'rtsp://admin:P@ssw0rd@192.168.1.6:554/cam/realmonitor?channel=1&subtype=0':
                 if camera['camera_url'] == 'rtmp://13.203.184.235/live/stream/test':
                     rtmp_camera = camera
                     break
@@ -70,7 +66,6 @@ def test_camera_connection():
             if rtmp_camera:
                 print(f"✅ Found RTMP camera with ID: {rtmp_camera['id']}")
                 
-                # Test the camera connection
                 test_response = requests.get(f"http://localhost:5000/test_camera_feed/{rtmp_camera['id']}")
                 if test_response.status_code == 200:
                     test_result = test_response.json()
@@ -98,7 +93,6 @@ if __name__ == "__main__":
     print("🚀 Adding RTMP Camera Feed to Employee Attendance System")
     print("=" * 60)
     
-    # Check if requests module is available
     try:
         import requests
     except ImportError:
@@ -106,7 +100,6 @@ if __name__ == "__main__":
         print("Please install it using: pip install requests")
         sys.exit(1)
     
-    # Add the camera feed
     print("\n📹 Adding RTMP camera feed...")
     if add_rtmp_camera():
         print("\n🧪 Testing camera connection...")

@@ -27,14 +27,15 @@
               <tr>
                 <th>Photo</th>
                 <th>Name</th>
-                <th>Employee ID</th>
+                <th>Designation</th>
+                <th>Department</th>
+                <th>Location</th>
                 <th>Status</th>
                 <th>Last Detected</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              <!-- Employee status rows will be populated here -->
             </tbody>
           </table>
         </div>
@@ -79,9 +80,8 @@
 <script>
 let employees = [];
 let employeeStatus = {};
-let previousStatus = {}; // Track previous status for notifications
+let previousStatus = {};
 
-// Load employee status data from the new endpoint
 function loadEmployeeStatusData() {
   fetch('/employee_status_data')
     .then(res => res.json())
@@ -94,7 +94,6 @@ function loadEmployeeStatusData() {
       employees = data.employees;
       employeeStatus = {};
       
-      // Convert to the format expected by the rendering functions
       employees.forEach(employee => {
         employeeStatus[employee.name] = {
           status: employee.status,
@@ -103,7 +102,6 @@ function loadEmployeeStatusData() {
         };
       });
       
-      // Check for status changes and show notifications
       checkStatusChanges();
       
       renderEmployeeStatus();
@@ -114,14 +112,12 @@ function loadEmployeeStatusData() {
     });
 }
 
-// Check for status changes and show notifications
 function checkStatusChanges() {
   employees.forEach(employee => {
     const currentStatus = employee.status;
     const previousStatusForEmployee = previousStatus[employee.name];
     
     if (previousStatusForEmployee && previousStatusForEmployee !== currentStatus) {
-      // Status changed
       if (currentStatus === 'present') {
         showStatusNotification(`${employee.name} is now PRESENT`, 'success');
       } else if (currentStatus === 'absent') {
@@ -129,12 +125,10 @@ function checkStatusChanges() {
       }
     }
     
-    // Update previous status
     previousStatus[employee.name] = currentStatus;
   });
 }
 
-// Show status change notification
 function showStatusNotification(message, type) {
   const notification = document.createElement('div');
   notification.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
@@ -145,7 +139,6 @@ function showStatusNotification(message, type) {
   `;
   document.body.appendChild(notification);
   
-  // Auto-remove after 4 seconds
   setTimeout(() => {
     if (notification.parentNode) {
       notification.remove();
@@ -153,7 +146,6 @@ function showStatusNotification(message, type) {
   }, 4000);
 }
 
-// Render employee status table
 function renderEmployeeStatus() {
   const tbody = document.querySelector('#employee-status-table tbody');
   const searchQuery = document.getElementById('searchInput').value.toLowerCase();
@@ -217,7 +209,6 @@ function updateSummary(summary) {
   document.getElementById('lastUpdated').textContent = summary.last_updated;
 }
 
-// Initial load
 loadEmployeeStatusData();
 </script>
 {% endblock %} 

@@ -1,0 +1,1254 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Detection Stream Viewer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #000;
+            color: #fff;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+
+        /* App layout: 78% left (video), 22% right (alerts/history) */
+        .app-layout {
+            display: flex;
+            flex-direction: row;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .left-pane {
+            position: relative;
+            flex: 0 0 78%;
+            max-width: 78%;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+        }
+
+        .right-pane {
+            flex: 0 0 22%;
+            max-width: 22%;
+            height: 100vh;
+            background: #0b0b0b;
+            border-left: 1px solid #222;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-header {
+            padding: 10px 12px;
+            border-bottom: 1px solid #222;
+            background: rgba(0,0,0,0.6);
+        }
+
+        .sidebar-header h6 {
+            margin: 0;
+            font-weight: 700;
+        }
+
+        .sidebar-panel {
+            position: relative;
+            flex: 1 1 auto;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .stream-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 0;
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        .stream-item {
+            position: relative;
+            border: 2px solid #333;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #111;
+        }
+
+        .stream-item.single {
+            width: 100%;
+            height: 100%;
+        }
+
+        .stream-item.grid-2 {
+            width: calc(50% - 1px);
+            height: calc(50% - 1px);
+        }
+
+        .stream-item.grid-3 {
+            width: calc(33.33% - 2px);
+            height: calc(50% - 1px);
+        }
+
+        .stream-item.grid-4 {
+            width: calc(50% - 1px);
+            height: calc(50% - 1px);
+        }
+
+        .stream-item.grid-many {
+            width: calc(33.33% - 2px);
+            height: calc(33.33% - 2px);
+        }
+
+        .stream-video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .stream-overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+        }
+
+        .stream-status {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #dc3545;
+        }
+
+        .stream-status.active {
+            background: #28a745;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+
+            100% {
+                opacity: 1;
+            }
+        }
+
+        .control-panel {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 10px;
+            z-index: 1000;
+            transition: opacity 0.3s;
+        }
+
+        .control-panel.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        /* Live alerts overlay (bottom-right of left pane) */
+        .detection-card-container {
+            position: absolute;
+            right: 20px;
+            bottom: 20px;
+            z-index: 1000;
+            width: 360px;
+            max-width: calc(100% - 40px);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            pointer-events: none;
+        }
+        .detection-card-container > * { pointer-events: auto; }
+
+        /* History list */
+        .detection-history {
+            display: flex;
+            flex-direction: column-reverse; /* newest on top when appending at end */
+            gap: 8px;
+        }
+        .history-item {
+            background: #141414;
+            border: 1px solid #2a2a2a;
+            border-radius: 8px;
+            padding: 8px;
+            color: #e0e0e0;
+        }
+        .history-item .title {
+            font-weight: 700;
+            font-size: 13px;
+        }
+        .history-item .meta {
+            font-size: 11px;
+            color: #bdbdbd;
+        }
+
+        .detection-info {
+    position: fixed;
+    top: 30px;
+    right: 30px;
+    background: rgba(0, 0, 0, 0.85);
+    padding: 18px 20px 12px 20px;
+    border-radius: 12px;
+    z-index: 1000;
+    max-width: 340px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.25);
+    min-width: 220px;
+}
+
+        .no-stream {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+    width: 100%;
+    color: #666;
+    background: rgba(0,0,0,0.7);
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 10;
+}
+
+        .connection-status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px 15px;
+            border-radius: 5px;
+            z-index: 1001;
+        }
+
+        .fullscreen-btn {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            border: none;
+            color: white;
+            padding: 10px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            z-index: 1000;
+        }
+
+        .access-card {
+            width: 100%;
+            max-width: 100%;
+            background: #ffffff;
+            border: 2px solid #ccc;
+            border-radius: 8px;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.3s ease-in-out;
+            margin-bottom: 10px;
+        }
+        
+        .access-card.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        
+        .access-card.hide {
+            opacity: 0;
+            transform: translateY(-20px);
+        }
+
+        .access-card .header {
+            background-color: rgba(17, 46, 163, 1);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 4px 6px;
+            flex-wrap: wrap;
+            text-align: center;
+        }
+
+        .access-card .header h1 {
+            font-family: 'Inter', sans-serif;
+            font-size: 14px;
+            font-weight: 900;
+            margin: 0;
+            letter-spacing: 0.3px;
+        }
+
+        .access-card .logo {
+            width: 16px;
+            height: 16px;
+        }
+
+        .access-card .main-content {
+            display: flex;
+            flex-direction: row;
+            flex-wrap: nowrap;
+            padding: 6px 8px;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .access-card .left-section {
+            flex: 0 0 80px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .access-card .photo-border {
+            border: 4px solid green;
+            border-radius: 3px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            max-width: 72px;
+            height: 60px;
+        }
+
+        .access-card .profile-photo {
+            width: 100%;
+            height: 52px;
+            object-fit: cover;
+            border-radius: 3px;
+        }
+
+        .access-card .right-section {
+            flex: 1 1 auto;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 2px;
+        }
+
+        .access-card .details {
+            display: flex;
+            align-items: stretch;
+            flex-wrap: wrap;
+        }
+
+        .access-card .label {
+            background-color: #003cb3;
+            color: white;
+            padding: 3px 6px;
+            font-size: 10px;
+            font-weight: bolder;
+            border-top-right-radius: 4px;
+            border-bottom-left-radius: 4px;
+            width: 70px;
+            min-width: 70px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+        }
+
+        .access-card .info {
+            background-color: #D9D9D9;
+            color: #000;
+            padding: 3px 6px;
+            font-size: 10px;
+            font-weight: bolder;
+            border-top-right-radius: 2px;
+            border-bottom-right-radius: 2px;
+            flex: 1;
+            min-width: 90px;
+            display: flex;
+            align-items: center;
+        }
+
+        .access-card .footer {
+            font-family: 'Orbitron', sans-serif;
+            background-color: white;
+            color: green;
+            text-align: center;
+            font-size: 12px;
+            font-weight: 700;
+            padding: 4px 0;
+            border-top: 1px solid #ddd;
+            letter-spacing: 0.3px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="connection-status">
+        <span id="connectionStatus" class="badge bg-danger">Connecting...</span>
+    </div>
+
+    <div class="app-layout">
+        <div class="left-pane">
+            <div class="stream-container" id="mainStreamContainer">
+                <canvas id="wsVideoCanvas" style="width:100%;height:100%;display:none;background:#000;"></canvas>
+
+                <div class="no-stream" id="noStreamMsg">
+                    <i class="fas fa-video fa-3x mb-3"></i>
+                    <h4>Waiting for Stream...</h4>
+                    <p>Make sure streaming is enabled in Settings</p>
+                </div>
+
+                <div class="video-status-container" style="position:absolute;bottom:10px;left:50%;transform:translateX(-50%);">
+                    <span id="videoStatus" class="badge bg-danger">No Stream</span>
+                </div>
+            </div>
+            <!-- Live detection cards overlay -->
+            <div class="detection-card-container" id="detection-card-container"></div>
+        </div>
+
+        <div class="right-pane">
+            <div class="sidebar-header d-flex justify-content-between align-items-center">
+                <h6 class="mb-0"><i class="fas fa-clock-rotate-left me-2"></i>History</h6>
+                <button class="btn btn-sm btn-outline-light" onclick="clearHistory()"><i class="fas fa-trash me-1"></i>Clear</button>
+            </div>
+            <div id="historyPanel" class="sidebar-panel">
+                <div id="detection-history" class="detection-history"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="control-panel" id="controlPanel">
+        <h6><i class="fas fa-cog"></i> Controls</h6>
+        <div class="mb-2">
+            <button class="btn btn-sm btn-outline-light" onclick="toggleControls()">
+                <i class="fas fa-eye-slash"></i> Hide Controls
+            </button>
+        </div>
+        <div class="mb-2">
+            <button class="btn btn-sm btn-outline-light" onclick="refreshStream()">
+                <i class="fas fa-sync"></i> Refresh
+            </button>
+        </div>
+        <div class="mb-2">
+            <label class="form-label text-light" style="font-size: 12px;">Layout:</label>
+            <select class="form-select form-select-sm" id="layoutSelect" onchange="changeLayout()">
+                <option value="auto">Auto</option>
+                <option value="single">Single</option>
+                <option value="grid">Grid</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- moved to right sidebar -->
+
+    <style>
+        .green-border { border: 8px solid green !important; }
+        .red-border { border: 8px solid red !important; }
+        .granted-footer { color: green !important; }
+        .denied-footer { color: red !important; }
+        .denied-card .footer { background-color: white; }
+        .denied-card .photo-border { border: 8px solid red !important; }
+        .denied-card .footer { color: red !important; }
+    </style>
+
+
+    <button class="fullscreen-btn" onclick="toggleFullscreen()">
+        <i class="fas fa-expand"></i>
+    </button>
+
+    <div style="position: fixed; top: 10px; left: 10px; z-index: 1000; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 5px;">
+        <button onclick="testSocketIO()" style="margin: 5px; padding: 5px 10px; background: #dc3545; color: white; border: none; border-radius: 3px;">Test Socket.IO</button>
+    </div>
+
+
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script> 
+
+    <script>
+        let socket = null;
+        let pc = null;
+        let webrtcVideo = null;
+        let reconnectTimeout = null;
+
+        let cardCounter = 0;
+        let activeCards = new Map();
+        // Throttle: show a new card only if >=4s since last popup; each card lasts 5s
+        const DETECTION_MIN_INTERVAL_MS = 4000;
+        const CARD_VISIBLE_MS = 5000;
+        let lastPopupTime = 0;
+        const detectionHistory = [];
+        const MAX_HISTORY = 100;
+        
+        function createDetectionCard(type, data) {
+            const cardId = `detection-card-${++cardCounter}`;
+            const container = document.getElementById('detection-card-container');
+            
+            const cardElement = document.createElement('div');
+            cardElement.id = cardId;
+            cardElement.className = `access-card ${type}-card`;
+            
+            const now = new Date();
+            const currentDate = now.toLocaleDateString();
+            const currentTime = data.timestamp || now.toLocaleTimeString();
+            
+            if (type === 'granted') {
+                cardElement.innerHTML = `
+                    <div class="header">
+                        <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Logo" class="logo" />
+                        <h1>IG SECURITY SYSTEM</h1>
+                        <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Logo" class="logo" />
+                    </div>
+                    <div class="main-content">
+                        <div class="left-section">
+                            <div class="photo-border green-border">
+                                <img src="{{ url_for('static', filename='images/default-avatar.png') }}"
+                                    alt="Profile" class="profile-photo" />
+                            </div>
+                        </div>
+                        <div class="right-section">
+                            <div class="details">
+                                <span class="label">NAME:</span>
+                                <span class="info">${data.employee_name || 'Unknown Employee'}</span>
+                            </div>
+                            <div class="details">
+                                <span class="label">DESIGNATION:</span>
+                                <span class="info">${data.designation || 'N/A'}</span>
+                            </div>
+                            <div class="details">
+                                <span class="label">DEPARTMENT:</span>
+                                <span class="info">${data.department || 'N/A'}</span>
+                            </div>
+                            <div class="details">
+                                <span class="label">DATE:</span>
+                                <span class="info">${currentDate}</span>
+                            </div>
+                            <div class="details">
+                                <span class="label">TIME:</span>
+                                <span class="info">${currentTime}</span>
+                            </div>
+                            <div class="details">
+                                <span class="label">LOCATION:</span>
+                                <span class="info">${data.location || 'Unknown Location'}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="footer granted-footer">
+                        ACCESS GRANTED!
+                    </div>
+                `;
+            } else {
+                cardElement.innerHTML = `
+                    <div class="header">
+                        <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Logo" class="logo" />
+                        <h1>IG SECURITY SYSTEM</h1>
+                        <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Logo" class="logo" />
+                    </div>
+                    <div class="main-content">
+                        <div class="left-section">
+                            <div class="photo-border red-border">
+                                <img src="{{ url_for('static', filename='images/default-avatar.png') }}"
+                                    alt="Profile" class="profile-photo" />
+                            </div>
+                        </div>
+                        <div class="right-section">
+                            <div class="details">
+                                <span class="label">NAME:</span>
+                                <span class="info">${data.employee_name || 'Unknown Visitor'}</span>
+                            </div>
+                            <div class="details">
+                                <span class="label">DESIGNATION:</span>
+                                <span class="info">${data.designation || 'N/A'}</span>
+                            </div>
+                            <div class="details">
+                                <span class="label">DEPARTMENT:</span>
+                                <span class="info">${data.department || 'N/A'}</span>
+                            </div>
+                            <div class="details">
+                                <span class="label">DATE:</span>
+                                <span class="info">${currentDate}</span>
+                            </div>
+                            <div class="details">
+                                <span class="label">TIME:</span>
+                                <span class="info">${currentTime}</span>
+                            </div>
+                            <div class="details">
+                                <span class="label">LOCATION:</span>
+                                <span class="info">${data.location || 'Unknown Location'}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="footer denied-footer">
+                        ACCESS DENIED!
+                    </div>
+                `;
+            }
+            
+            container.appendChild(cardElement);
+            
+            setTimeout(() => {
+                cardElement.classList.add('show');
+            }, 50);
+            
+            const hideTimer = setTimeout(() => {
+                hideDetectionCard(cardId);
+            }, CARD_VISIBLE_MS);
+            
+            activeCards.set(cardId, {
+                element: cardElement,
+                timer: hideTimer,
+                type: type,
+                data: data
+            });
+            
+            return cardId;
+        }
+        
+        function hideDetectionCard(cardId) {
+            const cardInfo = activeCards.get(cardId);
+            if (!cardInfo) return;
+            
+            const { element, timer } = cardInfo;
+            
+            if (timer) clearTimeout(timer);
+            
+            element.classList.add('hide');
+            element.classList.remove('show');
+            
+            setTimeout(() => {
+                if (element.parentNode) {
+                    element.parentNode.removeChild(element);
+                }
+                activeCards.delete(cardId);
+            }, 300);
+        }
+        
+        function clearAllDetectionCards() {
+            activeCards.forEach((cardInfo, cardId) => {
+                hideDetectionCard(cardId);
+            });
+        }
+        function handleDetectionEvent(data) {
+            console.log('[MultiCard] Processing detection event:', data);
+            console.log('[MultiCard] Access value:', data.access, 'Type:', typeof data.access);
+            
+            const isGranted = data.access === true || data.access === 'true' || data.access === true;
+            const cardType = isGranted ? 'granted' : 'denied';
+            
+            console.log(`[MultiCard] Creating ${cardType.toUpperCase()} card for: ${data.employee_name}`);
+            
+            const cardId = createDetectionCard(cardType, data);
+            addHistoryEntry(cardType, data);
+            
+            // Store detection in database
+            storeDetectionInDatabase(data, isGranted);
+            
+            console.log(`[MultiCard] ${cardType.toUpperCase()} card created with ID: ${cardId}`);
+            console.log(`[MultiCard] Active cards count: ${activeCards.size}`);
+            
+            if (activeCards.size > 5) {
+                const oldestCardId = activeCards.keys().next().value;
+                console.log(`[MultiCard] Too many cards, removing oldest: ${oldestCardId}`);
+                hideDetectionCard(oldestCardId);
+            }
+        }
+
+        function addHistoryEntry(type, data) {
+            const now = new Date();
+            const timeString = data.timestamp || now.toLocaleTimeString();
+            const item = {
+                type,
+                name: data.employee_name || (type === 'granted' ? 'Unknown Employee' : 'Unknown Visitor'),
+                designation: data.designation || 'N/A',
+                department: data.department || 'N/A',
+                location: data.location || 'N/A',
+                confidence: data.confidence,
+                timestamp: timeString
+            };
+            detectionHistory.push(item);
+            if (detectionHistory.length > MAX_HISTORY) detectionHistory.shift();
+            renderHistoryItem(item);
+        }
+
+        function renderHistoryItem(item) {
+            const historyEl = document.getElementById('detection-history');
+            if (!historyEl) return;
+            const entry = document.createElement('div');
+            entry.className = 'history-item';
+            const badge = item.type === 'granted' ? '<span class="badge bg-success me-2">GRANTED</span>' : '<span class="badge bg-danger me-2">DENIED</span>';
+            const conf = (item.confidence !== undefined && item.confidence !== null) ? ` • Confidence: ${item.confidence}` : '';
+            entry.innerHTML = `
+                <div class="title">${badge}${item.name}</div>
+                <div class="meta">${item.timestamp} • ${item.location}${conf}<br/>${item.designation} — ${item.department}</div>
+            `;
+            historyEl.appendChild(entry);
+        }
+
+        function clearHistory() {
+            // Clear local history display
+            const historyEl = document.getElementById('detection-history');
+            if (historyEl) historyEl.innerHTML = '';
+            detectionHistory.length = 0;
+            
+            // Clear database history (with confirmation)
+            if (confirm('Are you sure you want to clear all detection history from the database? This action cannot be undone.')) {
+                fetch('/api/detection_history/clear?confirm=true', {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        console.log('[Database] History cleared successfully. Deleted', result.deleted_count, 'records.');
+                        alert(`History cleared successfully. Deleted ${result.deleted_count} records.`);
+                    } else {
+                        console.error('[Database] Failed to clear history:', result.error);
+                        alert('Failed to clear history: ' + result.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('[Database] Error clearing history:', error);
+                    alert('Error clearing history: ' + error.message);
+                });
+            }
+        }
+
+        function storeDetectionInDatabase(data, isGranted) {
+            const detectionData = {
+                access: isGranted,
+                employee_name: data.employee_name || (isGranted ? 'Unknown Employee' : 'Unknown Visitor'),
+                designation: data.designation || 'N/A',
+                department: data.department || 'N/A',
+                confidence: data.confidence,
+                location: data.location || 'Unknown Location',
+                camera_name: data.camera_name || 'Unknown Camera',
+                camera_id: data.camera_id || 'Unknown',
+                detection_type: 'face_detection',
+                timestamp: data.timestamp || new Date().toISOString()
+            };
+
+            fetch('/api/detection_history', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(detectionData)
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    console.log('[Database] Detection stored successfully:', result.detection_id);
+                } else {
+                    console.error('[Database] Failed to store detection:', result.error);
+                }
+            })
+            .catch(error => {
+                console.error('[Database] Error storing detection:', error);
+            });
+        }
+
+        function loadDetectionHistory() {
+            fetch('/api/detection_history?limit=50')
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    // Clear existing history display
+                    const historyEl = document.getElementById('detection-history');
+                    if (historyEl) {
+                        historyEl.innerHTML = '';
+                    }
+                    
+                    // Add each detection to history display
+                    result.detections.forEach(detection => {
+                        const item = {
+                            type: detection.access_granted ? 'granted' : 'denied',
+                            name: detection.employee_name,
+                            designation: detection.designation,
+                            department: detection.department,
+                            location: detection.location,
+                            confidence: detection.confidence_score,
+                            timestamp: new Date(detection.timestamp).toLocaleTimeString()
+                        };
+                        renderHistoryItem(item);
+                    });
+                    
+                    console.log('[History] Loaded', result.detections.length, 'detection records');
+                } else {
+                    console.error('[History] Failed to load detection history:', result.error);
+                }
+            })
+            .catch(error => {
+                console.error('[History] Error loading detection history:', error);
+            });
+        }
+
+        // live panel removed; history is always visible in the right pane
+
+        function tryDisplayDetection(data) {
+            const now = Date.now();
+            if (now - lastPopupTime >= DETECTION_MIN_INTERVAL_MS) {
+                handleDetectionEvent(data);
+                lastPopupTime = now;
+            } else {
+                // Throttled; ignore this detection
+            }
+        }
+
+        function initializeSocket() {
+            console.log('[Socket] Initializing Socket.IO connection...');
+            socket = io({
+                transports: ['websocket', 'polling'],
+                upgrade: true,
+                rememberUpgrade: true
+            });
+            
+            socket.on('detection_event', function(data) {
+                console.log('[WebSocket] Received detection_event:', data);
+                console.log('[WebSocket] Detection data access field:', data.access, typeof data.access);
+                
+                console.log('[BROWSER] Emitting detection_event with fields:');
+                console.log(`    employee_name: ${data.employee_name || 'N/A'}`);
+                console.log(`    confidence: ${data.confidence || 'N/A'}`);
+                console.log(`    designation: ${data.designation || 'N/A'}`);
+                console.log(`    department: ${data.department || 'N/A'}`);
+                console.log(`    location: ${data.location || 'N/A'}`);
+                console.log(`    timestamp: ${data.timestamp || 'N/A'}`);
+                console.log(`    access: ${data.access}`);
+                console.log(`    camera_name: ${data.camera_name || 'N/A'}`);
+                console.log(`    camera_id: ${data.camera_id || 'N/A'}`);
+                console.log('[BROWSER] detection_event received successfully.');
+                
+                tryDisplayDetection(data);
+            });
+            
+            socket.on('connect', function () {
+                console.log('[Socket] Connected to server');
+                console.log('[Socket] Socket ID:', socket.id);
+                updateConnectionStatus('Connected', 'success');
+                
+                console.log('[Socket] Emitting test_event to verify communication...');
+                socket.emit('test_event', { message: 'Frontend connected successfully' });
+                
+                console.log('[Socket] Emitting join_stream_viewer to activate backend streaming...');
+                socket.emit('join_stream_viewer');
+                
+                setTimeout(() => {
+                    console.log('[Socket] Connection status check - Connected:', socket.connected);
+                    console.log('[Socket] Socket ID after timeout:', socket.id);
+                }, 2000);
+            });
+            
+            socket.on('disconnect', function () {
+                console.log('[Socket] Disconnected from server');
+                updateConnectionStatus('Disconnected', 'danger');
+                streamActive = false;
+                showNoStream();
+            });
+            
+            socket.on('stream_update', function (data) {
+            });
+            
+            socket.on('stream_status', function (data) {
+                if (data.active) {
+                    streamActive = true;
+                    hideNoStream();
+                } else {
+                    streamActive = false;
+                    showNoStream();
+                }
+            });
+
+            socket.on('stream_viewer_count_update', function(data) {
+            });
+            
+            socket.on('connect_error', function(error) {
+                console.error('[Socket] Connection error:', error);
+                updateConnectionStatus('Connection Error', 'danger');
+            });
+            
+            socket.on('error', function(error) {
+                console.error('[Socket] Socket error:', error);
+            });
+            
+            socket.on('test_response', function(data) {
+                console.log('[Socket] Received test response from backend:', data);
+            });
+            
+            window.testSocketIO = function() {
+                console.log('[TEST] Manually triggering test event...');
+                socket.emit('test_detection_event');
+            };
+            
+
+        }
+        let streamActive = false;
+
+        document.addEventListener('DOMContentLoaded', function () {
+            
+            initializeSocket();
+            
+            webrtcVideo = document.getElementById('webrtcVideo');
+            updateConnectionStatus('Connecting...', 'danger');
+
+            startWebSocketFallback();
+
+            // History is the only sidebar view
+            // Load detection history from database
+            loadDetectionHistory();
+
+            const videoStatus = document.getElementById('videoStatus');
+            function setVideoStatus(state) {
+                if (state === 'streaming') {
+                    videoStatus.textContent = 'Streaming (WebRTC)';
+                    videoStatus.className = 'badge bg-success';
+                } else {
+                    videoStatus.textContent = 'No Stream';
+                    videoStatus.className = 'badge bg-danger';
+                }
+            }
+            setVideoStatus('no');
+            
+            if (webrtcVideo) {
+                webrtcVideo.addEventListener('playing', () => setVideoStatus('streaming'));
+                webrtcVideo.addEventListener('pause', () => setVideoStatus('no'));
+                webrtcVideo.addEventListener('ended', () => setVideoStatus('no'));
+                webrtcVideo.addEventListener('error', () => setVideoStatus('no'));
+            }
+        });
+
+        function initializeWebRTCViewer() {
+            if (socket) socket.disconnect();
+            socket = io();
+
+            socket.on('connect', () => {
+                updateConnectionStatus('Connected', 'success');
+                socket.emit('join_stream_viewer');
+                startWebRTCStreaming();
+            });
+            socket.on('disconnect', () => {
+                updateConnectionStatus('Disconnected', 'danger');
+                stopWebRTCPlayback();
+            });
+            socket.on('webrtc_answer', async (data) => {
+                window._webrtcAnswerReceived = true;
+                if (!pc) return;
+                try {
+                    const answer = new RTCSessionDescription({ type: data.type, sdp: data.sdp });
+                    await pc.setRemoteDescription(answer);
+                } catch (err) {
+                    updateConnectionStatus('SDP Error', 'danger');
+                    stopWebRTCPlayback();
+                }
+            });
+            window._webrtcAnswerReceived = false;
+            setTimeout(() => {
+                if (!window._webrtcAnswerReceived) {
+                }
+            }, 5000);
+            socket.on('webrtc_ice_candidate', async (data) => {
+                if (!pc) return;
+                try {
+                    pc.addIceCandidate(new RTCIceCandidate(data));
+                } catch (err) {
+                }
+            });
+
+            async function startWebRTCStreaming() {
+                pc = new RTCPeerConnection({
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                });
+                pc.ontrack = (event) => {
+                    if (webrtcVideo.srcObject !== event.streams[0]) {
+                        webrtcVideo.srcObject = event.streams[0];
+                    }
+                };
+                pc.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        socket.emit('webrtc_ice_candidate', event.candidate.toJSON());
+                    }
+                };
+                pc.onconnectionstatechange = () => {
+                    if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+                        stopWebRTCPlayback();
+                        attemptReconnect();
+                    }
+                };
+
+                try {
+                    pc.addTransceiver('video', { direction: 'sendrecv' });
+                    const offer = await pc.createOffer();
+                    await pc.setLocalDescription(offer);
+                    socket.emit('webrtc_offer', { sdp: offer.sdp, camera_url: 0 });
+                } catch (error) {
+                    updateConnectionStatus('Setup Failed', 'danger');
+                    stopWebRTCPlayback();
+                    attemptReconnect();
+                }
+            }
+        }
+
+        function stopWebRTCPlayback() {
+            if (pc) {
+                pc.ontrack = null;
+                pc.onicecandidate = null;
+                pc.onconnectionstatechange = null;
+                pc.close();
+                pc = null;
+            }
+            if (webrtcVideo) {
+                webrtcVideo.srcObject = null;
+                webrtcVideo.style.display = 'none';
+            }
+            document.getElementById('noStreamMsg').style.display = 'flex';
+            streamActive = false;
+        }
+
+        function updateConnectionStatus(status, type) {
+            const badge = document.getElementById('connectionStatus');
+            badge.textContent = status;
+            badge.className = 'badge bg-' + (type || 'danger');
+        }
+
+
+        let wsFallback = null;
+        let wsCanvas = null;
+        let wsCtx = null;
+        const wsEndpoint = `ws://${window.location.hostname}:8765`;
+
+        function startWebSocketFallback() {
+
+            const webrtcVideo = document.getElementById('webrtcVideo');
+            const canvas = document.getElementById('wsVideoCanvas');
+            const noStreamMsg = document.getElementById('noStreamMsg');
+            const videoStatus = document.getElementById('videoStatus');
+
+            if (webrtcVideo) webrtcVideo.style.display = 'none';
+            if (canvas) canvas.style.display = 'block';
+            if (noStreamMsg) noStreamMsg.style.display = 'none';
+
+            if (!canvas) {
+                return;
+            }
+            const ctx = canvas.getContext('2d');
+            const ws = new WebSocket(wsEndpoint);
+            updateConnectionStatus('WebSocket JPEG Fallback', 'warning');
+
+            ws.onopen = function () {
+                updateConnectionStatus('WebSocket JPEG Connected', 'success');
+                videoStatus.textContent = 'Streaming (WebSocket)';
+                videoStatus.className = 'badge bg-success';
+            };
+
+            ws.onmessage = function (event) {
+                try {
+                    const message = JSON.parse(event.data);
+                    if (message.type === 'video_frame' && message.frame) {
+                        const img = new Image();
+                        img.onload = function () {
+                            canvas.width = img.width;
+                            canvas.height = img.height;
+                            ctx.clearRect(0, 0, canvas.width, canvas.height);
+                            ctx.drawImage(img, 0, 0);
+                        };
+                        img.src = 'data:image/jpeg;base64,' + message.frame;
+                    } else if (message.type === 'employee_details') {
+                        const data = {
+                            employee_name: message.name || 'Unknown Visitor',
+                            designation: message.designation || '',
+                            department: message.department || '',
+                            location: message.location || '',
+                            access: message.access,
+                            confidence: message.confidence,
+                            timestamp: message.timestamp
+                        };
+                        tryDisplayDetection(data);
+                    }
+                } catch (err) {
+                    updateConnectionStatus('WebSocket JPEG Frame Error', 'danger');
+                }
+            };
+
+            ws.onclose = function () {
+                updateConnectionStatus('WebSocket JPEG Disconnected', 'danger');
+                videoStatus.textContent = 'No Stream';
+                videoStatus.className = 'badge bg-danger';
+            };
+
+            ws.onerror = function (error) {
+                updateConnectionStatus('WebSocket JPEG Error', 'danger');
+            };
+
+            window.wsConnection = ws;
+        }
+        function handleWebRTCErrorFallback() {
+            stopWebRTCPlayback();
+            startWebSocketFallback();
+        }
+        const oldUpdateConnectionStatus = updateConnectionStatus;
+        updateConnectionStatus = function (status, type) {
+            oldUpdateConnectionStatus(status, type);
+            if (status && status.toLowerCase().includes('error')) {
+                handleWebRTCErrorFallback();
+            }
+        };
+        let controlsVisible = true;
+        let currentLayout = 'auto';
+        let streamData = {};
+        document.addEventListener('DOMContentLoaded', function () {
+            initializeSocket();
+            setTimeout(() => {
+                if (streamActive) {
+                    toggleControls();
+                }
+            }, 5000);
+            document.addEventListener('mousemove', function () {
+                if (!controlsVisible && streamActive) {
+                    toggleControls();
+                    setTimeout(() => {
+                        if (controlsVisible) {
+                            toggleControls();
+                        }
+                    }, 3000);
+                }
+            });
+        });
+
+        function updateStreamFrame(data) {
+            const container = document.getElementById('mainStreamContainer');
+
+            if (!streamData[data.camera_id]) {
+                createStreamItem(data.camera_id, data.camera_name);
+            }
+
+            const streamItem = document.getElementById(`stream-${data.camera_id}`);
+            const video = streamItem.querySelector('.stream-video');
+            const status = streamItem.querySelector('.stream-status');
+
+            video.src = `data:image/jpeg;base64,${data.frame}`;
+
+            status.classList.add('active');
+
+            updateLayout();
+        }
+
+        function createStreamItem(cameraId, cameraName) {
+            const container = document.getElementById('mainStreamContainer');
+
+            const streamItem = document.createElement('div');
+            streamItem.className = 'stream-item';
+            streamItem.id = `stream-${cameraId}`;
+
+            streamItem.innerHTML = `
+                <img class="stream-video" alt="Camera ${cameraName}">
+                <div class="stream-overlay">
+                    <i class="fas fa-video"></i> ${cameraName}
+                </div>
+                <div class="stream-status"></div>
+            `;
+
+            container.appendChild(streamItem);
+            streamData[cameraId] = { name: cameraName, element: streamItem };
+        }
+
+        function updateLayout() {
+            const streamItems = document.querySelectorAll('.stream-item');
+            const count = streamItems.length;
+
+            let layoutClass = 'single';
+            if (currentLayout === 'auto') {
+                if (count === 1) layoutClass = 'single';
+                else if (count === 2) layoutClass = 'grid-2';
+                else if (count === 3) layoutClass = 'grid-3';
+                else if (count === 4) layoutClass = 'grid-4';
+                else layoutClass = 'grid-many';
+            } else if (currentLayout === 'grid') {
+                layoutClass = count <= 4 ? `grid-${count}` : 'grid-many';
+            }
+
+            streamItems.forEach(item => {
+                item.className = `stream-item ${layoutClass}`;
+            });
+        }
+
+        function changeLayout() {
+            currentLayout = document.getElementById('layoutSelect').value;
+            updateLayout();
+        }
+
+        function toggleControls() {
+            const panel = document.getElementById('controlPanel');
+            controlsVisible = !controlsVisible;
+
+            if (controlsVisible) {
+                panel.classList.remove('hidden');
+            } else {
+                panel.classList.add('hidden');
+            }
+        }
+
+        function refreshStream() {
+            socket.emit('refresh_stream');
+            location.reload();
+        }
+
+        function showNoStream() {
+            const noStreamMsg = document.getElementById('noStreamMsg');
+            if (noStreamMsg) noStreamMsg.style.display = 'flex';
+            const webrtcVideo = document.getElementById('webrtcVideo');
+            if (webrtcVideo) webrtcVideo.style.display = 'none';
+            const wsVideoCanvas = document.getElementById('wsVideoCanvas');
+            if (wsVideoCanvas) wsVideoCanvas.style.display = 'none';
+        }
+
+        function hideNoStream() {
+            const noStream = document.querySelector('.no-stream');
+            if (noStream) noStream.style.display = 'none';
+            const webrtcVideo = document.getElementById('webrtcVideo');
+            if (webrtcVideo) webrtcVideo.style.display = 'block';
+            const wsVideoCanvas = document.getElementById('wsVideoCanvas');
+            if (wsVideoCanvas) wsVideoCanvas.style.display = 'block';
+        }
+            
+        
+
+
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen();
+            } else {
+                document.exitFullscreen();
+            }
+        }
+
+        document.addEventListener('fullscreenchange', function () {
+            const btn = document.querySelector('.fullscreen-btn i');
+            if (document.fullscreenElement) {
+                btn.className = 'fas fa-compress';
+            } else {
+                btn.className = 'fas fa-expand';
+            }
+        });
+    </script>
+
+</body>
+
+</html>

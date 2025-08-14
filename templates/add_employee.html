@@ -3,16 +3,24 @@
 <h2>Add Employee</h2>
 <form id="addEmployeeForm" method="POST" action="/add_employee" enctype="multipart/form-data" class="mt-3">
   <div class="mb-3">
+    <label for="office_employee_id" class="form-label">Office Employee ID</label>
+    <input type="text" class="form-control" id="office_employee_id" name="office_employee_id" required>
+  </div>
+  <div class="mb-3">
     <label for="name" class="form-label">Name</label>
     <input type="text" class="form-control" id="name" name="name" required>
   </div>
   <div class="mb-3">
-    <label for="employee_id" class="form-label">Employee ID</label>
-    <input type="text" class="form-control" id="employee_id" name="employee_id" required>
+    <label for="designation" class="form-label">Designation</label>
+    <input type="text" class="form-control" id="designation" name="designation" required>
   </div>
   <div class="mb-3">
-    <label for="description" class="form-label">Description</label>
-    <textarea class="form-control" id="description" name="description"></textarea>
+    <label for="department" class="form-label">Department</label>
+    <input type="text" class="form-control" id="department" name="department" required>
+  </div>
+  <div class="mb-3">
+    <label for="location" class="form-label">Location</label>
+    <input type="text" class="form-control" id="location" name="location" required>
   </div>
   <div class="mb-3">
     <label for="images" class="form-label">Images (select multiple)</label>
@@ -21,7 +29,6 @@
   <button type="submit" class="btn btn-primary">Add Employee</button>
 </form>
 
-<!-- Success Modal -->
 <div class="modal fade" id="successModal" tabindex="-1" aria-labelledby="successModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
@@ -53,7 +60,6 @@ document.getElementById('addEmployeeForm').onsubmit = function(e) {
         const modal = new bootstrap.Modal(document.getElementById('successModal'));
         modal.show();
         document.getElementById('successOkBtn').onclick = function() {
-          // Reset the form for adding another employee
           document.getElementById('addEmployeeForm').reset();
         };
       } else {

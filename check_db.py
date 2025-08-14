@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import sqlite3
 import os
 
@@ -12,7 +11,6 @@ def check_database():
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
-        # Check criminals table
         cursor.execute("SELECT COUNT(*) FROM criminal")
         criminal_count = cursor.fetchone()[0]
         print(f"✅ Criminals in database: {criminal_count}")
@@ -22,7 +20,6 @@ def check_database():
             print("   Detection won't work without criminals to detect.")
             print("   Please add some criminals first.")
         
-        # Check camera feeds table
         cursor.execute("SELECT COUNT(*) FROM camera_feed")
         camera_count = cursor.fetchone()[0]
         print(f"✅ Camera feeds in database: {camera_count}")
@@ -31,12 +28,10 @@ def check_database():
             print("⚠️  WARNING: No camera feeds configured!")
             print("   Detection will use default webcam if available.")
         
-        # Check detection logs
         cursor.execute("SELECT COUNT(*) FROM detection_log")
         log_count = cursor.fetchone()[0]
         print(f"✅ Detection logs: {log_count}")
         
-        # Show recent detections
         cursor.execute("SELECT criminal_name, timestamp FROM detection_log ORDER BY timestamp DESC LIMIT 5")
         recent = cursor.fetchall()
         if recent:

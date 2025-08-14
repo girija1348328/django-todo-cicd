@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebSocket Video Stream Test</title>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; padding: 20px; background-color: #f0f0f0; }
+        h1 { color: #333; }
+        #videoCanvas { border: 2px solid #333; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); width: 100%; max-width: 800px; height: auto; background-color: #000; }
+        .popup { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: #fff; padding: 20px 30px; border-radius: 10px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2); z-index: 100; text-align: center; opacity: 0; visibility: hidden; transition: opacity 0.5s ease-in-out, visibility 0.5s ease-in-out; }
+        .popup.show { opacity: 1; visibility: visible; }
+        .popup h2 { margin-top: 0; color: #007bff; }
+        .popup p { margin: 5px 0; font-size: 1.1em; color: #555; }
+        .popup strong { color: #333; }
+    </style>
+  </head>
+  <body>
+    <h1>WebSocket Video Stream</h1>
+    <canvas id="videoCanvas"></canvas>
+
+    <div id="employeePopup" class="popup">
+      <h2>Employee Details</h2>
+      <p><strong>Name:</strong> <span id="employeeName"></span></p>
+      <p><strong>Designation:</strong> <span id="employeeDesignation"></span></p>
+      <p><strong>Department:</strong> <span id="employeeDepartment"></span></p>
+      <p><strong>Location:</strong> <span id="employeeLocation"></span></p>
+    </div>
+
+    <script>
+      const ws = new WebSocket('ws://' + window.location.hostname + ':8765');
+      const canvas = document.getElementById('videoCanvas');
+      const ctx = canvas.getContext('2d');
+      const employeePopup = document.getElementById('employeePopup');
+      let popupTimeout = null;
+
+      function showPopup(data) {
+        document.getElementById('employeeName').textContent = data.name || 'Unknown Visitor';
+        document.getElementById('employeeDesignation').textContent = data.designation || '';
+        document.getElementById('employeeDepartment').textContent = data.department || '';
+        document.getElementById('employeeLocation').textContent = data.location || '';
+
+        employeePopup.classList.add('show');
+
+        if (popupTimeout) {
+          clearTimeout(popupTimeout);
+        }
+        popupTimeout = setTimeout(() => {
+          employeePopup.classList.remove('show');
+        }, 5000);
+      }
+
+      ws.onopen = function () {
+        console.log('WebSocket connected');
+      };
+
+      ws.onmessage = function (event) {
+        try {
+          const message = JSON.parse(event.data);
+          if (message.type === 'video_frame' && message.frame) {
+            const img = new Image();
+            img.onload = function () {
+              canvas.width = img.width;
+              canvas.height = img.height;
+              ctx.clearRect(0, 0, canvas.width, canvas.height);
+              ctx.drawImage(img, 0, 0);
+            };
+            img.src = 'data:image/jpeg;base64,' + message.frame;
+          } else if (message.type === 'employee_details') {
+            console.log('Employee details:', message);
+            showPopup(message);
+          } else {
+            console.log('Other message:', message);
+          }
+        } catch (e) {
+          console.warn('Invalid message', e);
+        }
+      };
+
+      ws.onclose = function () {
+        console.log('WebSocket connection closed');
+      };
+
+      ws.onerror = function (error) {
+        console.log('WebSocket error:', error);
+      };
+    </script>
+  </body>
+  </html>
+
+

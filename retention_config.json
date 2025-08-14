@@ -1,0 +1,8 @@
+{
+  "retention_days": 90,
+  "auto_cleanup": false,
+  "cleanup_frequency_hours": 24,
+  "max_records": 10000,
+  "backup_before_cleanup": true,
+  "notify_on_cleanup": true
+}

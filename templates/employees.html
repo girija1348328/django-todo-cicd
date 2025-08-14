@@ -11,24 +11,23 @@
     <thead class="table-dark">
       <tr>
         <th>Image</th>
+        <th>Office Employee ID</th>
         <th>Name</th>
-        <th>ID</th>
-        <th>Description</th>
+        <th>Designation</th>
+        <th>Department</th>
+        <th>Location</th>
         <th>Actions</th>
       </tr>
     </thead>
     <tbody>
-      <!-- Rows will be populated by JS -->
     </tbody>
   </table>
 </div>
 <nav>
   <ul class="pagination" id="pagination">
-    <!-- Pagination will be populated by JS -->
   </ul>
 </nav>
 
-<!-- Edit Modal -->
 <div class="modal fade" id="editModal" tabindex="-1" aria-labelledby="editModalLabel" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
@@ -40,16 +39,24 @@
         <div class="modal-body">
           <input type="hidden" id="edit-id" name="id">
           <div class="mb-3">
+            <label for="edit-office-employee-id" class="form-label">Office Employee ID</label>
+            <input type="text" class="form-control" id="edit-office-employee-id" name="office_employee_id" required>
+          </div>
+          <div class="mb-3">
             <label for="edit-name" class="form-label">Name</label>
             <input type="text" class="form-control" id="edit-name" name="name" required>
           </div>
           <div class="mb-3">
-            <label for="edit-employee_id" class="form-label">Employee ID</label>
-            <input type="text" class="form-control" id="edit-employee_id" name="employee_id" required>
+            <label for="edit-designation" class="form-label">Designation</label>
+            <input type="text" class="form-control" id="edit-designation" name="designation" required>
           </div>
           <div class="mb-3">
-            <label for="edit-description" class="form-label">Description</label>
-            <textarea class="form-control" id="edit-description" name="description"></textarea>
+            <label for="edit-department" class="form-label">Department</label>
+            <input type="text" class="form-control" id="edit-department" name="department" required>
+          </div>
+          <div class="mb-3">
+            <label for="edit-location" class="form-label">Location</label>
+            <input type="text" class="form-control" id="edit-location" name="location" required>
           </div>
           <div class="mb-3">
             <label for="edit-images" class="form-label">Add more photos to improve recognition (optional)</label>
@@ -81,9 +88,11 @@ function renderTablePage(page) {
     const row = document.createElement('tr');
     row.innerHTML = `
       <td><img src="${e.image_url}" alt="${e.name}" width="80" height="80" style="object-fit:cover;"></td>
+      <td>${e.office_employee_id}</td>
       <td>${e.name}</td>
-      <td>${e.employee_id}</td>
-      <td>${e.description || ''}</td>
+      <td>${e.designation}</td>
+      <td>${e.department}</td>
+      <td>${e.location}</td>
       <td>
         <button class="btn btn-sm btn-warning me-2" onclick="editEmployee(${e.id})">Edit</button>
         <button class="btn btn-sm btn-danger" onclick="deleteEmployee(${e.id})">Delete</button>
@@ -112,10 +121,13 @@ function renderPagination() {
 }
 
 function filterData() {
-  const query = document.getElementById('searchInput').value.toLowerCase();
+  const search = document.getElementById('searchInput').value.toLowerCase();
   filteredData = employeesData.filter(e =>
-    e.name.toLowerCase().includes(query) ||
-    e.employee_id.toLowerCase().includes(query)
+    e.office_employee_id.toLowerCase().includes(search) ||
+    e.name.toLowerCase().includes(search) ||
+    e.designation.toLowerCase().includes(search) ||
+    e.department.toLowerCase().includes(search) ||
+    e.location.toLowerCase().includes(search)
   );
   currentPage = 1;
   renderTablePage(currentPage);
@@ -148,9 +160,11 @@ function editEmployee(id) {
   const e = employeesData.find(x => x.id === id);
   if (!e) return;
   document.getElementById('edit-id').value = e.id;
+  document.getElementById('edit-office-employee-id').value = e.office_employee_id;
   document.getElementById('edit-name').value = e.name;
-  document.getElementById('edit-employee_id').value = e.employee_id;
-  document.getElementById('edit-description').value = e.description || '';
+  document.getElementById('edit-designation').value = e.designation;
+  document.getElementById('edit-department').value = e.department;
+  document.getElementById('edit-location').value = e.location;
   document.getElementById('edit-images').value = '';
   const modal = new bootstrap.Modal(document.getElementById('editModal'));
   modal.show();
@@ -174,7 +188,6 @@ document.getElementById('editForm').onsubmit = function(e) {
     });
 };
 
-// Initial load
 loadEmployees();
 </script>
 {% endblock %} 

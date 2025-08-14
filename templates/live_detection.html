@@ -2,12 +2,9 @@
 {% block content %}
 <h2 class="mb-4">Live Detection Grid</h2>
 
-<!-- Camera Grid -->
 <div class="row" id="cameraGrid">
-    <!-- Camera feeds will be inserted here by JavaScript -->
 </div>
 
-<!-- Recent Detections Panel -->
 <div class="row mt-4">
     <div class="col-12">
         <div class="card">
@@ -35,7 +32,7 @@ function loadCameraFeeds() {
         .then(feeds => {
             const activeFeeds = feeds.filter(feed => feed.is_active);
             const grid = document.getElementById('cameraGrid');
-            grid.innerHTML = ''; // Clear existing content
+            grid.innerHTML = '';
 
             if (activeFeeds.length === 0) {
                 grid.innerHTML = `
@@ -47,10 +44,8 @@ function loadCameraFeeds() {
                 return;
             }
 
-            // Create the 3x3 grid
             activeFeeds.forEach(feed => {
                 const col = document.createElement('div');
-                // Use col-lg-4 for large screens, col-md-6 for medium
                 col.className = 'col-lg-4 col-md-6 mb-4';
                 
                 col.innerHTML = `

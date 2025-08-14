@@ -91,13 +91,11 @@ let detectionActive = false;
 let detectionCount = 0;
 let recentDetections = [];
 
-// Get camera ID from URL parameters
 function getCameraId() {
     const urlParams = new URLSearchParams(window.location.search);
     return urlParams.get('camera_id');
 }
 
-// Load camera information
 function loadCameraInfo() {
     cameraId = getCameraId();
     if (!cameraId) {
@@ -136,11 +134,9 @@ function startDetection() {
     document.getElementById('detectionStatus').className = 'badge bg-success';
     document.getElementById('noFeed').style.display = 'none';
     
-    // Start video feed
     const videoFeed = document.getElementById('videoFeed');
     videoFeed.src = `/live_detection?camera_feed_id=${cameraId}`;
     
-    // Start monitoring for detections
     startDetectionMonitoring();
 }
 
@@ -152,13 +148,11 @@ function stopDetection() {
     document.getElementById('detectionStatus').className = 'badge bg-secondary';
     document.getElementById('noFeed').style.display = 'block';
     
-    // Stop video feed
     const videoFeed = document.getElementById('videoFeed');
     videoFeed.src = '';
 }
 
 function startDetectionMonitoring() {
-    // Poll for new detections every 5 seconds
     const detectionInterval = setInterval(() => {
         if (!detectionActive) {
             clearInterval(detectionInterval);
@@ -168,7 +162,6 @@ function startDetectionMonitoring() {
         fetch('/attendance_logs')
             .then(response => response.json())
             .then(data => {
-                // Robust camera name comparison: trim, lowercase, collapse spaces
                 function normalizeName(name) {
                     return name ? name.trim().replace(/\s+/g, ' ').toLowerCase() : '';
                 }
@@ -198,13 +191,11 @@ function startDetectionMonitoring() {
 function addAttendanceToList(attendance) {
     const container = document.getElementById('recentDetections');
     
-    // Remove "No attendance records yet" message if present
     const noDetections = container.querySelector('.text-muted');
     if (noDetections) {
         noDetections.remove();
     }
     
-    // Create attendance item
     const attendanceItem = document.createElement('div');
     attendanceItem.className = 'alert alert-warning alert-sm mb-2';
     attendanceItem.innerHTML = `
@@ -221,10 +212,8 @@ function addAttendanceToList(attendance) {
         </div>
     `;
     
-    // Add to top of list
     container.insertBefore(attendanceItem, container.firstChild);
     
-    // Keep only last 10 attendance records
     const items = container.querySelectorAll('.alert');
     if (items.length > 10) {
         items[items.length - 1].remove();
@@ -235,12 +224,10 @@ function updateAttendanceStats(attendance) {
     document.getElementById('detectionCount').textContent = detectionCount;
     document.getElementById('lastDetection').textContent = attendance.timestamp;
     
-    // Show notification
     showNotification(`Employee detected: ${attendance.employee_name}`);
 }
 
 function showNotification(message) {
-    // Create notification element
     const notification = document.createElement('div');
     notification.className = 'alert alert-danger alert-dismissible fade show position-fixed';
     notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
@@ -251,7 +238,6 @@ function showNotification(message) {
     
     document.body.appendChild(notification);
     
-    // Auto-remove after 5 seconds
     setTimeout(() => {
         if (notification.parentNode) {
             notification.remove();
@@ -259,17 +245,14 @@ function showNotification(message) {
     }, 5000);
 }
 
-// Initialize page
 document.addEventListener('DOMContentLoaded', function() {
     loadCameraInfo();
     
-    // Auto-start detection if camera ID is provided
     if (getCameraId()) {
         setTimeout(startDetection, 1000);
     }
 });
 
-// Handle page unload
 window.addEventListener('beforeunload', function() {
     detectionActive = false;
 });

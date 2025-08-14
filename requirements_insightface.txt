@@ -1,0 +1,7 @@
+# Clone insightface into the repo directory
+git clone https://github.com/deepinsight/insightface.git insightface_repo
+
+# Install in development mode
+pip install -e insightface_repo/python-package
+
+insightface

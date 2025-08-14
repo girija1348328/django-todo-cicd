@@ -89,15 +89,11 @@ class FaceTracker:
         stable_objects = {}
         for object_id, hist in self.history.items():
             if self.disappeared.get(object_id, 0) == 0:
-                # Get the most common name if it's not 'Unknown' or if it's the only option
                 most_common_name = max(set(hist), key=list(hist).count)
                 
-                # Rule: Only confirm a name if it appears in more than half of recent frames
-                # and is not 'Unknown', unless 'Unknown' is the overwhelming majority.
                 if most_common_name != "Unknown" and list(hist).count(most_common_name) > self.history_size // 2:
                     final_name = most_common_name
                 else:
-                    # Fallback to the most recent detection if not stable
                     final_name = hist[-1] if hist else "Unknown"
 
                 stable_objects[object_id] = (self.objects[object_id], final_name)

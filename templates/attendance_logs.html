@@ -1,53 +1,144 @@
 {% extends 'base.html' %}
 {% block content %}
-<h2>Attendance Logs</h2>
-<div class="row mt-3 mb-2">
-  <div class="col-md-6">
-    <input type="text" id="searchInput" class="form-control" placeholder="Search by employee name or type...">
+<div class="container-fluid">
+  <h2 class="mb-4">📊 Attendance & Detection Logs</h2>
+  
+  <!-- Search and Actions Bar -->
+  <div class="row mb-3">
+    <div class="col-md-8">
+      <div class="input-group">
+        <input type="text" id="searchInput" class="form-control" placeholder="Search by employee name, department, location, camera...">
+        <button class="btn btn-outline-secondary" type="button" id="searchBtn">
+          <i class="fas fa-search"></i> Search
+        </button>
+      </div>
+    </div>
+    <div class="col-md-4 text-end">
+      <div class="btn-group" role="group">
+        <button type="button" class="btn btn-outline-primary" id="refreshBtn">
+          <i class="fas fa-sync-alt"></i> Refresh
+        </button>
+        <button type="button" class="btn btn-outline-danger" id="deleteAllBtn">
+          <i class="fas fa-trash"></i> Delete All
+        </button>
+      </div>
+    </div>
   </div>
-  <div class="col-md-6 text-end">
-    <button id="deleteAllBtn" class="btn btn-danger">
-      <i class="fas fa-trash"></i> Delete All Attendance Logs
-    </button>
-  </div>
-</div>
-<div class="table-responsive">
-  <table class="table table-bordered" id="logs-table">
-    <thead class="table-dark">
-      <tr>
-        <th>Timestamp</th>
-        <th>Employee Name</th>
-        <th>Attendance Type</th>
-      </tr>
-    </thead>
-    <tbody>
-      <!-- Rows will be populated by JS -->
-    </tbody>
-  </table>
-</div>
-<nav>
-  <ul class="pagination" id="pagination">
-    <!-- Pagination will be populated by JS -->
-  </ul>
-</nav>
-<script>
-let logsData = [];
-let filteredLogs = [];
-let currentPage = 1;
-const pageSize = 10;
 
-function renderTablePage(page) {
-  const tbody = document.querySelector('#logs-table tbody');
+  <!-- Main Table -->
+  <div class="table-responsive">
+    <table class="table table-striped table-hover" id="logs-table">
+      <thead class="table-dark">
+        <tr>
+          <th>🕒 Time</th>
+          <th>👤 Employee</th>
+          <th>🏢 Department</th>
+          <th>📍 Location</th>
+          <th>📹 Camera</th>
+          <th>✅ Status</th>
+          <th>🎯 Confidence</th>
+          <th>📝 Type</th>
+          <th>🔧 Actions</th>
+        </tr>
+      </thead>
+      <tbody id="logs-tbody">
+        <!-- Combined data will be loaded here -->
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pagination -->
+  <nav>
+    <ul class="pagination justify-content-center" id="pagination">
+    </ul>
+  </nav>
+</div>
+
+<script>
+// Combined data management
+let allData = [];
+let filteredData = [];
+let currentPage = 1;
+const pageSize = 15;
+
+// Load all data (attendance logs + detection history)
+function loadAllData() {
+  fetch('/api/detection_history').then(res => { if (!res.ok) throw new Error('detection_fetch_failed'); return res.json(); })
+  .then((detectionData) => {
+    // Support both array and {detections: [...]} shapes
+    const detectionArray = Array.isArray(detectionData) ? detectionData : (detectionData.detections || []);
+    const detectionFormatted = detectionArray.map(detection => ({
+      id: `det_${detection.id}`,
+      timestamp: detection.timestamp,
+      employee_name: detection.employee_name || 'Unknown',
+      department: detection.department || 'N/A',
+      location: detection.location || 'N/A',
+      camera_name: detection.camera_name || 'N/A',
+      status: detection.access_granted ? 'GRANTED' : 'DENIED',
+      confidence: detection.confidence_score ? `${(detection.confidence_score * 100).toFixed(1)}%` : 'N/A',
+      type: detection.detection_type || 'Detection',
+      access_granted: detection.access_granted,
+      is_attendance: false
+    }));
+    allData = detectionFormatted.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    filteredData = allData;
+    renderTable();
+    renderPagination();
+  })
+  .catch(error => {
+    console.error('Error loading data:', error);
+    document.getElementById('logs-tbody').innerHTML = 
+      '<tr><td colspan="9" class="text-center text-danger">Error loading data. Please refresh the page.</td></tr>';
+  });
+}
+
+function renderTable() {
+  const tbody = document.getElementById('logs-tbody');
   tbody.innerHTML = '';
-  const start = (page - 1) * pageSize;
+  
+  const start = (currentPage - 1) * pageSize;
   const end = start + pageSize;
-  const pageData = filteredLogs.slice(start, end);
-  pageData.forEach(log => {
+  const pageData = filteredData.slice(start, end);
+  
+  if (pageData.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No records found</td></tr>';
+    return;
+  }
+  
+  pageData.forEach(record => {
     const row = document.createElement('tr');
+    
+    // Determine status styling
+    let statusClass = 'secondary';
+    let statusIcon = '';
+    
+    if (record.is_attendance) {
+      statusClass = record.status === 'IN' ? 'success' : 'warning';
+      statusIcon = record.status === 'IN' ? '✅' : '🔄';
+    } else {
+      statusClass = record.access_granted ? 'success' : 'danger';
+      statusIcon = record.access_granted ? '✅' : '❌';
+    }
+    
+    const timestamp = record.timestamp ? new Date(record.timestamp).toLocaleString() : 'N/A';
+    
     row.innerHTML = `
-      <td>${log.timestamp}</td>
-      <td>${log.employee_name}</td>
-      <td>${log.attendance_type.charAt(0).toUpperCase() + log.attendance_type.slice(1)}</td>
+      <td><small>${timestamp}</small></td>
+      <td><strong>${record.employee_name}</strong></td>
+      <td>${record.department}</td>
+      <td>${record.location}</td>
+      <td><code>${record.camera_name}</code></td>
+      <td><span class="badge bg-${statusClass}">${statusIcon} ${record.status}</span></td>
+      <td><small>${record.confidence}</small></td>
+      <td><span class="badge bg-info">${record.type}</span></td>
+      <td>
+        <button class="btn btn-sm btn-outline-info" onclick="viewRecordDetails('${record.id}')">
+          <i class="fas fa-eye"></i>
+        </button>
+        <button class="btn btn-sm btn-outline-danger" onclick="deleteRecord('${record.id}')">
+          <i class="fas fa-trash"></i>
+        </button>
+      </td>
     `;
     tbody.appendChild(row);
   });
@@ -56,60 +147,163 @@ function renderTablePage(page) {
 function renderPagination() {
   const pagination = document.getElementById('pagination');
   pagination.innerHTML = '';
-  const pageCount = Math.ceil(filteredLogs.length / pageSize);
+  
+  const pageCount = Math.ceil(filteredData.length / pageSize);
+  if (pageCount <= 1) return;
+  
+  // Previous button
+  const prevLi = document.createElement('li');
+  prevLi.className = `page-item ${currentPage === 1 ? 'disabled' : ''}`;
+  prevLi.innerHTML = '<a class="page-link" href="#"><i class="fas fa-chevron-left"></i></a>';
+  prevLi.onclick = () => {
+    if (currentPage > 1) {
+      currentPage--;
+      renderTable();
+      renderPagination();
+    }
+  };
+  pagination.appendChild(prevLi);
+  
+  // Page numbers
   for (let i = 1; i <= pageCount; i++) {
     const li = document.createElement('li');
-    li.className = 'page-item' + (i === currentPage ? ' active' : '');
+    li.className = `page-item ${i === currentPage ? 'active' : ''}`;
     li.innerHTML = `<a class="page-link" href="#">${i}</a>`;
     li.onclick = function(e) {
       e.preventDefault();
       currentPage = i;
-      renderTablePage(currentPage);
+      renderTable();
       renderPagination();
     };
     pagination.appendChild(li);
   }
+  
+  // Next button
+  const nextLi = document.createElement('li');
+  nextLi.className = `page-item ${currentPage === pageCount ? 'disabled' : ''}`;
+  nextLi.innerHTML = '<a class="page-link" href="#"><i class="fas fa-chevron-right"></i></a>';
+  nextLi.onclick = () => {
+    if (currentPage < pageCount) {
+      currentPage++;
+      renderTable();
+      renderPagination();
+    }
+  };
+  pagination.appendChild(nextLi);
 }
 
-function filterLogs() {
+function filterData() {
   const query = document.getElementById('searchInput').value.toLowerCase();
-  filteredLogs = logsData.filter(log =>
-    log.employee_name.toLowerCase().includes(query) ||
-    log.attendance_type.toLowerCase().includes(query)
+  filteredData = allData.filter(record =>
+    (record.employee_name && record.employee_name.toLowerCase().includes(query)) ||
+    (record.department && record.department.toLowerCase().includes(query)) ||
+    (record.location && record.location.toLowerCase().includes(query)) ||
+    (record.camera_name && record.camera_name.toLowerCase().includes(query)) ||
+    (record.status && record.status.toLowerCase().includes(query)) ||
+    (record.type && record.type.toLowerCase().includes(query))
   );
   currentPage = 1;
-  renderTablePage(currentPage);
+  renderTable();
   renderPagination();
 }
 
-fetch('/attendance_logs')
-  .then(res => res.json())
-  .then(data => {
-    logsData = data;
-    filteredLogs = data;
-    filterLogs();
-  });
+function viewRecordDetails(recordId) {
+  const record = allData.find(d => d.id === recordId);
+  if (!record) return;
+  
+  const details = `
+Record ID: ${record.id}
+Employee: ${record.employee_name}
+Department: ${record.department}
+Location: ${record.location}
+Camera: ${record.camera_name}
+Status: ${record.status}
+Confidence: ${record.confidence}
+Type: ${record.type}
+Time: ${record.timestamp ? new Date(record.timestamp).toLocaleString() : 'N/A'}
+  `;
+  
+  alert(details);
+}
 
-document.getElementById('searchInput').addEventListener('input', filterLogs);
+function deleteRecord(recordId) {
+  if (!confirm('Are you sure you want to delete this record?')) return;
+  
+  if (recordId.startsWith('det_')) {
+    // Delete detection history record
+    const detectionId = recordId.replace('det_', '');
+    fetch(`/api/detection_history/${detectionId}`, { method: 'DELETE' })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          loadAllData(); // Reload all data
+          alert('Record deleted successfully!');
+        } else {
+          alert('Error deleting record: ' + data.message);
+        }
+      })
+      .catch(error => {
+        alert('Error deleting record: ' + error);
+      });
+  } else {
+    // Delete attendance log record
+    const attendanceId = recordId.replace('att_', '');
+    fetch(`/delete_attendance_log/${attendanceId}`, { method: 'DELETE' })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'success') {
+          loadAllData(); // Reload all data
+          alert('Record deleted successfully!');
+        } else {
+          alert('Error deleting record: ' + data.message);
+        }
+      })
+      .catch(error => {
+        alert('Error deleting record: ' + error);
+      });
+  }
+}
 
-document.getElementById('deleteAllBtn').addEventListener('click', function() {
-  if (!confirm('Are you sure you want to delete ALL attendance logs? This action cannot be undone.')) return;
-  fetch('/delete_all_attendance_logs', { method: 'DELETE' })
+function deleteAllRecords() {
+  if (!confirm('⚠️ This will delete ALL records (both attendance logs and detection history). This action cannot be undone!')) return;
+  
+  // Delete all detection history first
+  fetch('/api/detection_history/clear?confirm=true', { method: 'POST' })
+    .then(res => res.json())
+    .then(data => {
+      if (data.success) {
+        // Then delete all attendance logs
+        return fetch('/delete_all_attendance_logs', { method: 'DELETE' });
+      } else {
+        throw new Error('Failed to clear detection history');
+      }
+    })
     .then(res => res.json())
     .then(data => {
       if (data.status === 'success') {
-        logsData = [];
-        filteredLogs = [];
-        renderTablePage(1);
+        allData = [];
+        filteredData = [];
+        renderTable();
         renderPagination();
-        alert('All attendance logs deleted successfully!');
+        alert('All records cleared successfully!');
       } else {
-        alert('Error deleting logs: ' + data.message);
+        alert('Error clearing attendance logs: ' + data.message);
       }
     })
     .catch(error => {
-      alert('Error deleting logs: ' + error);
+      alert('Error clearing records: ' + error);
     });
+}
+
+// Event listeners
+document.getElementById('searchInput').addEventListener('input', filterData);
+document.getElementById('searchBtn').addEventListener('click', filterData);
+document.getElementById('refreshBtn').addEventListener('click', loadAllData);
+document.getElementById('deleteAllBtn').addEventListener('click', deleteAllRecords);
+
+// Initialize when page loads
+document.addEventListener('DOMContentLoaded', function() {
+  loadAllData();
 });
 </script>
 {% endblock %} 
