@@ -236,6 +236,7 @@
 }
 
         .connection-status {
+            display: none;
             position: fixed;
             top: 20px;
             right: 20px;
@@ -270,7 +271,16 @@
             flex-direction: column;
             opacity: 0;
             transform: translateY(20px);
-            transition: all 0.3s ease-in-out;
+            /* Smoothly animate transform, opacity, and size/position changes */
+            transition: opacity 0.25s ease-in-out,
+                        transform 0.35s ease-in-out,
+                        top 0.35s ease-in-out,
+                        right 0.35s ease-in-out,
+                        bottom 0.35s ease-in-out,
+                        left 0.35s ease-in-out,
+                        width 0.35s ease-in-out,
+                        height 0.35s ease-in-out,
+                        max-width 0.35s ease-in-out;
             margin-bottom: 10px;
         }
         
@@ -332,13 +342,13 @@
             align-items: center;
             justify-content: center;
             width: 100%;
-            max-width: 72px;
-            height: 60px;
+            max-width: 120px;
+            height: 100px;
         }
 
         .access-card .profile-photo {
             width: 100%;
-            height: 52px;
+            height: 92px;
             object-fit: cover;
             border-radius: 3px;
         }
@@ -397,6 +407,88 @@
             border-top: 1px solid #ddd;
             letter-spacing: 0.3px;
         }
+
+        /* Fullscreen-style maximize with safe padding from edges */
+        .access-card.maximized {
+            position: fixed;
+            /* padding from all edges */
+            top: 24px;
+            right: 24px;
+            bottom: 24px;
+            left: 24px;
+            width: auto;         /* allow to stretch */
+            max-width: none;     /* remove container limit */
+            height: auto;
+            margin: 0;           /* override bottom margin */
+            z-index: 5000;       /* ensure on top of everything */
+            transform: none;     /* reset translate */
+            overflow: auto;      /* allow scroll if content exceeds */
+            background: #ffffff; /* ensure solid backdrop when fullscreen */
+        }
+
+        /* Scale content for fullscreen readability */
+        .access-card.maximized .header {
+            padding: 10px 12px;
+        }
+        .access-card.maximized .header h1 {
+            font-size: 28px;
+            letter-spacing: 0.5px;
+        }
+        .access-card.maximized .logo {
+            width: 32px;
+            height: 32px;
+        }
+        .access-card.maximized .main-content {
+            padding: 16px 20px;
+            gap: 16px;
+        }
+        .access-card.maximized .left-section {
+            flex: 0 0 32%;
+            align-items: center;
+        }
+        .access-card.maximized .photo-border {
+            border-width: 12px;
+            max-width: 100%;
+            height: auto;
+        }
+        .access-card.maximized .profile-photo {
+            height: auto;
+            max-height: calc(100vh - 220px);
+        }
+        .access-card.maximized .right-section {
+            gap: 8px;
+        }
+        .access-card.maximized .details {
+            margin-bottom: 6px;
+        }
+        .access-card.maximized .label {
+            font-size: 14px;
+            min-width: 110px;
+            padding: 6px 8px;
+        }
+        .access-card.maximized .info {
+            font-size: 14px;
+            padding: 6px 10px;
+        }
+        .access-card.maximized .footer {
+            font-size: 18px;
+            padding: 8px 0;
+        }
+
+        /* Responsive tweak: on narrow screens, stack vertically */
+        @media (max-width: 900px) {
+            .access-card.maximized .main-content {
+                flex-direction: column;
+            }
+            .access-card.maximized .left-section {
+                flex: 0 0 auto;
+            }
+            .access-card.maximized .photo-border {
+                width: 100%;
+                max-width: 420px;
+                margin: 0 auto;
+            }
+        }
     </style>
 </head>
 
@@ -433,7 +525,7 @@
             </div>
         </div>
     </div>
-
+<!-- 
     <div class="control-panel" id="controlPanel">
         <h6><i class="fas fa-cog"></i> Controls</h6>
         <div class="mb-2">
@@ -454,7 +546,7 @@
                 <option value="grid">Grid</option>
             </select>
         </div>
-    </div>
+    </div> -->
 
 
     <style>
@@ -471,16 +563,25 @@
     <button class="fullscreen-btn" onclick="toggleFullscreen()">
         <i class="fas fa-expand"></i>
     </button>
-
+<!-- 
     <div style="position: fixed; top: 10px; left: 10px; z-index: 1000; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 5px;">
         <button onclick="testSocketIO()" style="margin: 5px; padding: 5px 10px; background: #dc3545; color: white; border: none; border-radius: 3px;">Test Socket.IO</button>
-    </div>
+    </div> -->
 
 
 
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script> 
 
     <script>
+        // Silence all console output on this page (no frontend logs)
+        (function(){
+            const disableLogs = true;
+            if (disableLogs && typeof console !== 'undefined') {
+                ['log','error','warn','info','debug'].forEach(function(k){
+                    try { console[k] = function(){}; } catch(e) {}
+                });
+            }
+        })();
         let socket = null;
         let pc = null;
         let webrtcVideo = null;
@@ -494,9 +595,15 @@
         const detectionHistory = [];
         const MAX_HISTORY = 100;
         
+        const defaultProfileImage = "{{ url_for('static', filename='img/default-avatar.png') }}";
+
         function createDetectionCard(type, data) {
             const cardId = `detection-card-${++cardCounter}`;
             const container = document.getElementById('detection-card-container');
+            
+            // console.log('[CARD] Creating card with image URL:', data.image_url);
+            // console.log('[CARD] Default profile image:', defaultProfileImage);
+            // console.log('[CARD] Final image URL will be:', data.image_url || defaultProfileImage);
             
             const cardElement = document.createElement('div');
             cardElement.id = cardId;
@@ -505,6 +612,8 @@
             const now = new Date();
             const currentDate = now.toLocaleDateString();
             const currentTime = data.timestamp || now.toLocaleTimeString();
+            const rawUrl = (data.image_url || '').trim();
+            const imgSrc = rawUrl && rawUrl !== 'N/A' ? rawUrl : defaultProfileImage;
             
             if (type === 'granted') {
                 cardElement.innerHTML = `
@@ -516,8 +625,9 @@
                     <div class="main-content">
                         <div class="left-section">
                             <div class="photo-border green-border">
-                                <img src="{{ url_for('static', filename='images/default-avatar.png') }}"
-                                    alt="Profile" class="profile-photo" />
+                                <img src="${imgSrc}"
+                                    alt="Profile" class="profile-photo"
+                                    onerror="this.onerror=null; this.src='${defaultProfileImage}';" />
                             </div>
                         </div>
                         <div class="right-section">
@@ -561,8 +671,9 @@
                     <div class="main-content">
                         <div class="left-section">
                             <div class="photo-border red-border">
-                                <img src="{{ url_for('static', filename='images/default-avatar.png') }}"
-                                    alt="Profile" class="profile-photo" />
+                                <img src="${data.image_url || defaultProfileImage}"
+                                    alt="Profile" class="profile-photo"
+                                    onerror="this.onerror=null; this.src='${defaultProfileImage}';" />
                             </div>
                         </div>
                         <div class="right-section">
@@ -600,10 +711,16 @@
             
             container.appendChild(cardElement);
             
+            // Start directly in maximized view, then shrink after 4s, hide at 5s
+            cardElement.classList.add('maximized');
             setTimeout(() => {
                 cardElement.classList.add('show');
             }, 50);
-            
+
+            const shrinkTimer = setTimeout(() => {
+                cardElement.classList.remove('maximized');
+            }, 4000);
+
             const hideTimer = setTimeout(() => {
                 hideDetectionCard(cardId);
             }, CARD_VISIBLE_MS);
@@ -611,6 +728,7 @@
             activeCards.set(cardId, {
                 element: cardElement,
                 timer: hideTimer,
+                shrinkTimer: shrinkTimer,
                 type: type,
                 data: data
             });
@@ -622,19 +740,36 @@
             const cardInfo = activeCards.get(cardId);
             if (!cardInfo) return;
             
-            const { element, timer } = cardInfo;
+            const { element, timer, shrinkTimer } = cardInfo;
             
             if (timer) clearTimeout(timer);
-            
-            element.classList.add('hide');
-            element.classList.remove('show');
-            
-            setTimeout(() => {
-                if (element.parentNode) {
-                    element.parentNode.removeChild(element);
-                }
-                activeCards.delete(cardId);
-            }, 300);
+            if (shrinkTimer) clearTimeout(shrinkTimer);
+
+            const wasMaximized = element.classList.contains('maximized');
+            if (wasMaximized) {
+                // Shrink first, then hide after transition
+                element.classList.remove('maximized');
+                setTimeout(() => {
+                    element.classList.add('hide');
+                    element.classList.remove('show');
+                    setTimeout(() => {
+                        if (element.parentNode) {
+                            element.parentNode.removeChild(element);
+                        }
+                        activeCards.delete(cardId);
+                    }, 300);
+                }, 350);
+            } else {
+                // Already minimized: hide immediately
+                element.classList.add('hide');
+                element.classList.remove('show');
+                setTimeout(() => {
+                    if (element.parentNode) {
+                        element.parentNode.removeChild(element);
+                    }
+                    activeCards.delete(cardId);
+                }, 300);
+            }
         }
         
         function clearAllDetectionCards() {
@@ -643,25 +778,25 @@
             });
         }
         function handleDetectionEvent(data) {
-            console.log('[MultiCard] Processing detection event:', data);
-            console.log('[MultiCard] Access value:', data.access, 'Type:', typeof data.access);
+            // console.log('[MultiCard] Processing detection event:', data);
+            // console.log('[MultiCard] Access value:', data.access, 'Type:', typeof data.access);
             
             const isGranted = data.access === true || data.access === 'true' || data.access === true;
             const cardType = isGranted ? 'granted' : 'denied';
             
-            console.log(`[MultiCard] Creating ${cardType.toUpperCase()} card for: ${data.employee_name}`);
+            // console.log(`[MultiCard] Creating ${cardType.toUpperCase()} card for: ${data.employee_name}`);
             
             const cardId = createDetectionCard(cardType, data);
             addHistoryEntry(cardType, data);
             
             storeDetectionInDatabase(data, isGranted);
             
-            console.log(`[MultiCard] ${cardType.toUpperCase()} card created with ID: ${cardId}`);
-            console.log(`[MultiCard] Active cards count: ${activeCards.size}`);
+            // console.log(`[MultiCard] ${cardType.toUpperCase()} card created with ID: ${cardId}`);
+            // console.log(`[MultiCard] Active cards count: ${activeCards.size}`);
             
             if (activeCards.size > 5) {
                 const oldestCardId = activeCards.keys().next().value;
-                console.log(`[MultiCard] Too many cards, removing oldest: ${oldestCardId}`);
+                // console.log(`[MultiCard] Too many cards, removing oldest: ${oldestCardId}`);
                 hideDetectionCard(oldestCardId);
             }
         }
@@ -709,15 +844,15 @@
                 .then(response => response.json())
                 .then(result => {
                     if (result.success) {
-                        console.log('[Database] History cleared successfully. Deleted', result.deleted_count, 'records.');
+                        // console.log('[Database] History cleared successfully. Deleted', result.deleted_count, 'records.');
                         alert(`History cleared successfully. Deleted ${result.deleted_count} records.`);
                     } else {
-                        console.error('[Database] Failed to clear history:', result.error);
+                        // console.error('[Database] Failed to clear history:', result.error);
                         alert('Failed to clear history: ' + result.error);
                     }
                 })
                 .catch(error => {
-                    console.error('[Database] Error clearing history:', error);
+                    // console.error('[Database] Error clearing history:', error);
                     alert('Error clearing history: ' + error.message);
                 });
             }
@@ -746,14 +881,10 @@
             })
             .then(response => response.json())
             .then(result => {
-                if (result.success) {
-                    console.log('[Database] Detection stored successfully:', result.detection_id);
-                } else {
-                    console.error('[Database] Failed to store detection:', result.error);
-                }
+                // optional: handle success silently
             })
             .catch(error => {
-                console.error('[Database] Error storing detection:', error);
+                // optional: handle error silently
             });
         }
 
@@ -780,13 +911,13 @@
                         renderHistoryItem(item);
                     });
                     
-                    console.log('[History] Loaded', result.detections.length, 'detection records');
+                    // console.log('[History] Loaded', result.detections.length, 'detection records');
                 } else {
-                    console.error('[History] Failed to load detection history:', result.error);
+                    // console.error('[History] Failed to load detection history:', result.error);
                 }
             })
             .catch(error => {
-                console.error('[History] Error loading detection history:', error);
+                // console.error('[History] Error loading detection history:', error);
             });
         }
 
@@ -801,7 +932,7 @@
         }
 
         function initializeSocket() {
-            console.log('[Socket] Initializing Socket.IO connection...');
+            // console.log('[Socket] Initializing Socket.IO connection...');
             socket = io({
                 transports: ['websocket', 'polling'],
                 upgrade: true,
@@ -809,43 +940,42 @@
             });
             
             socket.on('detection_event', function(data) {
-                console.log('[WebSocket] Received detection_event:', data);
-                console.log('[WebSocket] Detection data access field:', data.access, typeof data.access);
+                // suppress detailed detection logs
                 
-                console.log('[BROWSER] Emitting detection_event with fields:');
-                console.log(`    employee_name: ${data.employee_name || 'N/A'}`);
-                console.log(`    confidence: ${data.confidence || 'N/A'}`);
-                console.log(`    designation: ${data.designation || 'N/A'}`);
-                console.log(`    department: ${data.department || 'N/A'}`);
-                console.log(`    location: ${data.location || 'N/A'}`);
-                console.log(`    timestamp: ${data.timestamp || 'N/A'}`);
-                console.log(`    access: ${data.access}`);
-                console.log(`    camera_name: ${data.camera_name || 'N/A'}`);
-                console.log(`    camera_id: ${data.camera_id || 'N/A'}`);
-                console.log('[BROWSER] detection_event received successfully.');
+                // Test if the image URL is accessible
+                if (data.image_url && data.image_url !== 'N/A') {
+                    const testImg = new Image();
+                    testImg.onload = function() {
+                        // console.log('[IMAGE] Image loaded successfully:', data.image_url);
+                    };
+                    testImg.onerror = function() {
+                        // console.log('[IMAGE] Failed to load image:', data.image_url);
+                    };
+                    testImg.src = data.image_url;
+                }
                 
                 tryDisplayDetection(data);
             });
             
             socket.on('connect', function () {
-                console.log('[Socket] Connected to server');
-                console.log('[Socket] Socket ID:', socket.id);
+                // console.log('[Socket] Connected to server');
+                // console.log('[Socket] Socket ID:', socket.id);
                 updateConnectionStatus('Connected', 'success');
                 
-                console.log('[Socket] Emitting test_event to verify communication...');
+                // console.log('[Socket] Emitting test_event to verify communication...');
                 socket.emit('test_event', { message: 'Frontend connected successfully' });
                 
-                console.log('[Socket] Emitting join_stream_viewer to activate backend streaming...');
+                // console.log('[Socket] Emitting join_stream_viewer to activate backend streaming...');
                 socket.emit('join_stream_viewer');
                 
                 setTimeout(() => {
-                    console.log('[Socket] Connection status check - Connected:', socket.connected);
-                    console.log('[Socket] Socket ID after timeout:', socket.id);
+                    // console.log('[Socket] Connection status check - Connected:', socket.connected);
+                    // console.log('[Socket] Socket ID after timeout:', socket.id);
                 }, 2000);
             });
             
             socket.on('disconnect', function () {
-                console.log('[Socket] Disconnected from server');
+                // console.log('[Socket] Disconnected from server');
                 updateConnectionStatus('Disconnected', 'danger');
                 streamActive = false;
                 showNoStream();
@@ -868,20 +998,19 @@
             });
             
             socket.on('connect_error', function(error) {
-                console.error('[Socket] Connection error:', error);
+                // console.error('[Socket] Connection error:', error);
                 updateConnectionStatus('Connection Error', 'danger');
             });
             
             socket.on('error', function(error) {
-                console.error('[Socket] Socket error:', error);
+                // console.error('[Socket] Socket error:', error);
             });
             
             socket.on('test_response', function(data) {
-                console.log('[Socket] Received test response from backend:', data);
+                // console.log('[Socket] Received test response from backend:', data);
             });
             
             window.testSocketIO = function() {
-                console.log('[TEST] Manually triggering test event...');
                 socket.emit('test_detection_event');
             };
             
@@ -1128,7 +1257,7 @@
             const video = streamItem.querySelector('.stream-video');
             const status = streamItem.querySelector('.stream-status');
 
-            video.src = `data:image/jpeg;base64,${data.frame}`;
+            // video.src = `data:image/jpeg;base64,${data.frame}`;
 
             status.classList.add('active');
 

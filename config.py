@@ -6,6 +6,16 @@ class Config:
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'sqlite:///database.db'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     UPLOAD_FOLDER = os.path.join('static', 'uploads')
+    # SQLAlchemy engine options to reduce connection pool exhaustion and improve resiliency
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'pool_size': int(os.environ.get('DB_POOL_SIZE', 20)),
+        'max_overflow': int(os.environ.get('DB_MAX_OVERFLOW', 40)),
+        'pool_timeout': int(os.environ.get('DB_POOL_TIMEOUT', 30)),
+        'pool_recycle': int(os.environ.get('DB_POOL_RECYCLE', 1800)),  # recycle every 30 mins
+        'pool_pre_ping': True,
+        # For SQLite, allow connections across threads
+        'connect_args': {'check_same_thread': False}
+    }
     
     FACE_RECOGNITION_TOLERANCE = 0.5
     

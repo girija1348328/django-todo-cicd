@@ -16,13 +16,18 @@ class Employee(db.Model):
 
 class EmployeeImage(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    employee_id = db.Column(db.Integer, db.ForeignKey('employee.id'), nullable=False)
+    employee_id = db.Column(
+        db.Integer,
+        db.ForeignKey('employee.id', ondelete='CASCADE'),
+        nullable=False
+    )
     image_filename = db.Column(db.String(200), nullable=False)
     arcface_embedding = db.Column(db.PickleType, nullable=True)
 
 Employee.images = db.relationship(
     EmployeeImage,
-    backref='employee',
+    backref=db.backref('employee'),
     lazy=True,
-    order_by=EmployeeImage.id.asc()
+    order_by=EmployeeImage.id.asc(),
+    cascade="all, delete, delete-orphan"
 )
